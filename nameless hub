@@ -1,0 +1,784 @@
+-- ================================================
+--  Nameless SilentAim Module (Fused)
+--  SilentAim + ZSkill (Godhuman) + VSkill
+--  By HimselfZen
+-- ================================================
+local SilentAimModule = {}
+
+local Players          = game:GetService("Players")
+local UserInputService = game:GetService("UserInputService")
+local RunService       = game:GetService("RunService")
+local RS               = game:GetService("ReplicatedStorage")
+
+local player    = Players.LocalPlayer
+local camera    = workspace.CurrentCamera
+local commE     = RS:WaitForChild("Remotes"):WaitForChild("CommE")
+local MouseMod  = RS:FindFirstChild("Mouse")
+
+local Services = setmetatable({}, {
+    __index = function(t, k)
+        local ok, s = pcall(game.GetService, game, k)
+        if ok then t[k] = s return s end
+    end
+})
+
+-- ================================================
+--  STATE
+-- ================================================
+-- Silent Aim
+local SilentAimPlayersEnabled = false
+local SilentAimNPCsEnabled    = false
+local UserWantsPlayerAim      = false
+local UserWantsNPCAim         = false
+local PredictionEnabled       = false
+local HighlightEnabled        = false
+local AutoKen                 = false
+local ZSkillorM1              = false
+local autoKenRunning          = false
+local maxRange                = 1000
+local PredictionAmount        = 0.1
+local Selectedplayer          = nil
+
+local renderConnection  = nil
+local currentHighlight  = nil
+local currentTargetType = nil
+local PlayersPosition   = nil
+local NPCPosition       = nil
+local playersaimbot     = nil
+local NPCaimbot         = nil
+
+-- ZSkill (Godhuman Z aimlock)
+local ZSkillsEnabled    = false
+local godhumanZActive   = false
+local aimlockActive     = false
+local nearestZTarget    = nil
+local aimRenderConn     = nil
+local aimTimeoutTask    = nil
+local rightZTouching    = false
+local TargetInfo        = false
+local uiInfoConn        = nil
+
+-- VSkill (Shark / Dough / CursedKatana)
+local currentTool       = nil
+local lastTool          = nil
+local sharkZActive      = false
+local vActive           = false
+local cursedZActive     = false
+local rightVTouching    = false
+local dmgConn           = nil
+
+-- Connections
+local characterConnections = {}
+local MiniPlayerCreated    = false
+local MiniNpcCreated       = false
+local MiniPlayerGui        = nil
+local MiniNpcGui           = nil
+local MiniPlayerState      = nil
+local MiniNpcState         = nil
+
+-- ================================================
+--  HELPERS
+-- ================================================
+local function clearConnections()
+    for _, c in ipairs(characterConnections) do pcall(function() c:Disconnect() end) end
+    characterConnections = {}
+    if dmgConn then pcall(function() dmgConn:Disconnect() end) dmgConn = nil end
+    if aimRenderConn then pcall(function() aimRenderConn:Disconnect() end) aimRenderConn = nil end
+    if aimTimeoutTask then pcall(function() task.cancel(aimTimeoutTask) end) aimTimeoutTask = nil end
+end
+
+local function getHRP(model)
+    if not model then return nil end
+    return model:FindFirstChild("HumanoidRootPart")
+end
+
+local function isAllyWithMe(tp)
+    local g = player:FindFirstChild("PlayerGui")
+    if not g then return false end
+    local sf = g:FindFirstChild("Main") and g.Main:FindFirstChild("Allies")
+        and g.Main.Allies:FindFirstChild("Container")
+        and g.Main.Allies.Container:FindFirstChild("Allies")
+        and g.Main.Allies.Container.Allies:FindFirstChild("ScrollingFrame")
+    if sf then
+        for _, f in pairs(sf:GetDescendants()) do
+            if f:IsA("ImageButton") and f.Name == tp.Name then return true end
+        end
+    end
+    return false
+end
+
+local function isEnemy(tp)
+    if not tp or tp == player then return false end
+    local mt, tt = player.Team, tp.Team
+    if mt and tt then
+        if mt.Name == "Pirates"  and tt.Name == "Marines" then return true end
+        if mt.Name == "Marines"  and tt.Name == "Pirates"  then return true end
+        if mt.Name == "Pirates"  and tt.Name == "Pirates"  then return not isAllyWithMe(tp) end
+        if mt.Name == "Marines"  and tt.Name == "Marines"  then return false end
+    end
+    return true
+end
+
+local function getPredicted(hrp)
+    if not hrp then return nil end
+    local hum = hrp.Parent:FindFirstChildOfClass("Humanoid")
+    if not PredictionEnabled or not hum or hum.WalkSpeed < 5 then return hrp.Position end
+    return hrp.Position + (hrp.Velocity * PredictionAmount)
+end
+
+local function getClosestPlayer(lpHRP)
+    if not lpHRP then return nil end
+    local best, bestDist = nil, math.huge
+    for _, pl in ipairs(Players:GetPlayers()) do
+        if pl ~= player and isEnemy(pl) and pl.Character then
+            local hum = pl.Character:FindFirstChildOfClass("Humanoid")
+            local hrp = getHRP(pl.Character)
+            if hum and hum.Health > 0 and hrp then
+                local d = (hrp.Position - lpHRP.Position).Magnitude
+                if d <= maxRange and d < bestDist then
+                    bestDist = d
+                    best = (Selectedplayer and Selectedplayer ~= pl) and best or pl
+                    if not Selectedplayer then best = pl end
+                end
+            end
+        end
+    end
+    if Selectedplayer then
+        local hrp = Selectedplayer.Character and getHRP(Selectedplayer.Character)
+        if hrp then return Selectedplayer end
+    end
+    return best
+end
+
+local function getClosestNPC(lpHRP)
+    if not lpHRP then return nil end
+    local ef = workspace:FindFirstChild("Enemies")
+    if not ef then return nil end
+    local best, bestDist = nil, math.huge
+    for _, npc in ipairs(ef:GetChildren()) do
+        if npc:IsA("Model") then
+            local hum = npc:FindFirstChildOfClass("Humanoid")
+            local hrp = getHRP(npc)
+            if hum and hum.Health > 0 and hrp then
+                local d = (hrp.Position - lpHRP.Position).Magnitude
+                if d <= maxRange and d < bestDist then bestDist = d best = npc end
+            end
+        end
+    end
+    return best
+end
+
+-- ================================================
+--  HIGHLIGHT
+-- ================================================
+local function clearHighlight()
+    if currentHighlight then
+        pcall(function() currentHighlight:Destroy() end)
+        currentHighlight = nil
+    end
+    currentTargetType = nil
+end
+
+local function applyHighlight(model, ttype)
+    if not HighlightEnabled or not model then return end
+    if currentHighlight and currentHighlight.Adornee == model then return end
+    clearHighlight()
+    local h = Instance.new("Highlight")
+    h.FillTransparency = 0.5
+    h.OutlineTransparency = 0
+    h.FillColor = ttype == "Player" and Color3.fromRGB(255, 50, 50) or Color3.fromRGB(255, 165, 0)
+    h.OutlineColor = Color3.new(1, 1, 1)
+    h.Adornee = model
+    h.Parent = model
+    currentHighlight = h
+    currentTargetType = ttype
+end
+
+-- ================================================
+--  RENDER LOOP (Silent Aim)
+-- ================================================
+local function stopRenderLoop()
+    if renderConnection then
+        pcall(function() renderConnection:Disconnect() end)
+        renderConnection = nil
+    end
+    PlayersPosition = nil
+    NPCPosition     = nil
+    playersaimbot   = nil
+    NPCaimbot       = nil
+    clearHighlight()
+end
+
+local function startRenderLoop()
+    if renderConnection then return end
+
+    -- Hook mouse
+    local Mouse = nil
+    local ok, md = pcall(require, MouseMod)
+    if ok and type(md) == "table" then
+        Mouse = md
+    else
+        local char = player.Character or player.CharacterAdded:Wait()
+        local root = char and char:FindFirstChild("HumanoidRootPart")
+        if root then
+            pcall(function()
+                if type(Mouse) == "table" then
+                    Mouse.Hit = CFrame.new(root.Position)
+                    Mouse.Target = root
+                end
+            end)
+        end
+    end
+
+    renderConnection = RunService.Heartbeat:Connect(function()
+        if not SilentAimPlayersEnabled and not SilentAimNPCsEnabled then return end
+        if not ZSkillorM1 then return end
+
+        local char = player.Character
+        local lpHRP = char and getHRP(char)
+        if not lpHRP then return end
+
+        -- Players
+        if SilentAimPlayersEnabled then
+            local target = getClosestPlayer(lpHRP)
+            if target and target.Character then
+                local hrp = getHRP(target.Character)
+                if hrp then
+                    PlayersPosition = getPredicted(hrp)
+                    playersaimbot = target.Character
+                    applyHighlight(target.Character, "Player")
+                end
+            else
+                PlayersPosition = nil
+                playersaimbot = nil
+                if currentTargetType == "Player" then clearHighlight() end
+            end
+        else
+            PlayersPosition = nil
+            playersaimbot = nil
+        end
+
+        -- NPCs
+        if SilentAimNPCsEnabled and not PlayersPosition then
+            local npc = getClosestNPC(lpHRP)
+            if npc then
+                local hrp = getHRP(npc)
+                if hrp then
+                    NPCPosition = getPredicted(hrp)
+                    NPCaimbot = npc
+                    applyHighlight(npc, "NPC")
+                end
+            else
+                NPCPosition = nil
+                NPCaimbot = nil
+                if currentTargetType == "NPC" then clearHighlight() end
+            end
+        else
+            NPCPosition = nil
+            NPCaimbot = nil
+        end
+
+        -- Apply to mouse
+        local targetCFrame = PlayersPosition and CFrame.new(PlayersPosition)
+            or NPCPosition and CFrame.new(NPCPosition)
+
+        if targetCFrame and Mouse and type(Mouse) == "table" then
+            pcall(function()
+                Mouse.Hit    = targetCFrame
+                Mouse.Target = nil
+            end)
+            if MouseMod then
+                local ok2, md2 = pcall(require, MouseMod)
+                if ok2 and type(md2) == "table" then
+                    md2.Hit    = targetCFrame
+                    md2.Target = nil
+                end
+            end
+        end
+    end)
+end
+
+-- ================================================
+--  VSKILL — Disable/Enable Silent Aim temporarily
+-- ================================================
+local function pauseSilentAim()
+    SilentAimPlayersEnabled = false
+    SilentAimNPCsEnabled    = false
+end
+
+local function restoreSilentAim()
+    SilentAimPlayersEnabled = UserWantsPlayerAim
+    SilentAimNPCsEnabled    = UserWantsNPCAim
+end
+
+local function isVSkillActive()
+    return (currentTool and currentTool.Name == "Shark Anchor" and sharkZActive)
+        or (lastTool == "Dough-Dough" and vActive)
+        or (currentTool and currentTool.Name == "Cursed Dual Katana" and cursedZActive)
+end
+
+-- ================================================
+--  ZSKILL — Godhuman Z Camera Aimlock
+-- ================================================
+local function getNearest(maxDist)
+    local char = player.Character
+    local hrp  = char and getHRP(char)
+    if not hrp then return nil end
+    local best, bestDist = nil, maxDist or 1000
+    for _, pl in ipairs(Players:GetPlayers()) do
+        if pl ~= player and isEnemy(pl) and pl.Character and getHRP(pl.Character) then
+            local ohp = getHRP(pl.Character)
+            local hum = pl.Character:FindFirstChildOfClass("Humanoid")
+            if ohp and hum and hum.Health > 0 then
+                local d = (ohp.Position - hrp.Position).Magnitude
+                if d < bestDist then bestDist = d best = pl.Character end
+            end
+        end
+    end
+    return best
+end
+
+local function stopAimlock()
+    if not aimlockActive then return end
+    aimlockActive    = false
+    nearestZTarget   = nil
+    godhumanZActive  = false
+    if aimRenderConn then pcall(function() aimRenderConn:Disconnect() end) aimRenderConn = nil end
+    if aimTimeoutTask then pcall(function() task.cancel(aimTimeoutTask) end) aimTimeoutTask = nil end
+end
+
+local function startAimlock()
+    if not ZSkillsEnabled or aimlockActive then return end
+    nearestZTarget = getNearest(1000)
+    if not nearestZTarget then return end
+    aimlockActive = true
+
+    aimRenderConn = RunService.RenderStepped:Connect(function()
+        if not ZSkillsEnabled then stopAimlock() return end
+        if aimlockActive and nearestZTarget and getHRP(nearestZTarget) then
+            camera.CFrame = CFrame.lookAt(camera.CFrame.Position, getHRP(nearestZTarget).Position)
+        else
+            stopAimlock()
+        end
+    end)
+
+    aimTimeoutTask = task.delay(1, function()
+        if aimlockActive then stopAimlock() end
+    end)
+end
+
+-- ================================================
+--  TARGET INFO UI (from ZSkillModule)
+-- ================================================
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name = "NamelessTargetUI"
+screenGui.ResetOnSpawn = false
+screenGui.Parent = player:WaitForChild("PlayerGui")
+
+local targetFrame = Instance.new("Frame")
+targetFrame.Size = UDim2.new(0.25, 0, 0.08, 0)
+targetFrame.Position = UDim2.new(0.5, 0, 0.05, 0)
+targetFrame.AnchorPoint = Vector2.new(0.5, 0)
+targetFrame.BackgroundTransparency = 1
+targetFrame.Visible = false
+targetFrame.Parent = screenGui
+
+local targetNameLabel = Instance.new("TextLabel")
+targetNameLabel.Size = UDim2.new(1, 0, 0.5, 0)
+targetNameLabel.BackgroundTransparency = 1
+targetNameLabel.TextScaled = true
+targetNameLabel.Font = Enum.Font.GothamBold
+targetNameLabel.TextColor3 = Color3.new(1, 1, 1)
+targetNameLabel.Parent = targetFrame
+
+local hpBg = Instance.new("Frame")
+hpBg.Size = UDim2.new(1, 0, 0.35, 0)
+hpBg.Position = UDim2.new(0, 0, 0.55, 0)
+hpBg.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+hpBg.BorderSizePixel = 0
+hpBg.Parent = targetFrame
+
+local hpFill = Instance.new("Frame")
+hpFill.Size = UDim2.new(1, 0, 1, 0)
+hpFill.BackgroundColor3 = Color3.fromRGB(0, 255, 0)
+hpFill.BorderSizePixel = 0
+hpFill.Parent = hpBg
+
+-- ================================================
+--  DAMAGE COUNTER WATCH
+-- ================================================
+local function watchDamageCounter()
+    if dmgConn then pcall(function() dmgConn:Disconnect() end) dmgConn = nil end
+
+    task.spawn(function()
+        while true do
+            local gui = player:FindFirstChild("PlayerGui") and
+                        player.PlayerGui:FindFirstChild("Main")
+            if not gui then task.wait(1) continue end
+
+            local dc = gui:FindFirstChild("DmgCounter")
+            if not dc then task.wait(1) continue end
+
+            local lbl = dc:FindFirstChild("Text")
+            if not lbl then task.wait(1) continue end
+
+            dmgConn = lbl:GetPropertyChangedSignal("Text"):Connect(function()
+                local dmg = tonumber(lbl.Text) or 0
+                if dmg > 0 then
+                    -- VSkill: pause if skill active + touching right
+                    if isVSkillActive() and rightVTouching then
+                        pauseSilentAim()
+                    end
+                    -- ZSkill: stop aimlock if damage
+                    if aimlockActive then stopAimlock() end
+                elseif not rightVTouching then
+                    restoreSilentAim()
+                end
+            end)
+            table.insert(characterConnections, dmgConn)
+            break
+        end
+    end)
+end
+
+-- ================================================
+--  TOUCH INPUT (VSkill + ZSkill merged)
+-- ================================================
+UserInputService.TouchStarted:Connect(function(touch)
+    if not camera then return end
+    if touch.Position.X > camera.ViewportSize.X / 2 then
+        rightVTouching = true
+        rightZTouching = true
+        if isVSkillActive() then pauseSilentAim() end
+    end
+end)
+
+UserInputService.TouchEnded:Connect(function(touch)
+    if not camera then return end
+    if touch.Position.X > camera.ViewportSize.X / 2 then
+        rightVTouching = false
+        rightZTouching = false
+        restoreSilentAim()
+        sharkZActive, vActive, cursedZActive = false, false, false
+
+        -- ZSkill: trigger Godhuman Z aimlock on right touch release
+        if currentTool and currentTool.Name == "Godhuman" and godhumanZActive then
+            if not aimlockActive then startAimlock() end
+        end
+    end
+end)
+
+-- ================================================
+--  TOOL HOOK
+-- ================================================
+local function hookTool(tool)
+    if not tool then return end
+    currentTool = tool
+    lastTool    = tool.Name
+    table.insert(characterConnections, tool.AncestryChanged:Connect(function(_, parent)
+        if not parent then
+            currentTool     = nil
+            lastTool        = nil
+            sharkZActive    = false
+            vActive         = false
+            cursedZActive   = false
+            godhumanZActive = false
+            rightVTouching  = false
+            rightZTouching  = false
+            aimlockActive   = false
+            restoreSilentAim()
+        end
+    end))
+end
+
+-- ================================================
+--  NAMECALL HOOK (VSkill + ZSkill merged, 1 hook)
+-- ================================================
+if not getgenv().NamelessSkillHooked then
+    getgenv().NamelessSkillHooked = true
+    local old
+    old = hookmetamethod(game, "__namecall", function(self, ...)
+        local method = getnamecallmethod()
+        local args   = { ... }
+        if method == "InvokeServer" or method == "FireServer" then
+            local a1 = args[1]
+            if typeof(a1) == "string" then
+                local up = a1:upper()
+                if up == "Z" and currentTool then
+                    if currentTool.Name == "Godhuman"          then godhumanZActive = true end
+                    if currentTool.Name == "Shark Anchor"      then sharkZActive    = true end
+                    if currentTool.Name == "Cursed Dual Katana" then cursedZActive  = true end
+                end
+                if up == "V" and lastTool == "Dough-Dough" then
+                    vActive = true
+                end
+            end
+        end
+        return old(self, ...)
+    end)
+end
+
+-- ================================================
+--  AUTO KEN
+-- ================================================
+local function startAutoKenLoop()
+    if autoKenRunning then return end
+    autoKenRunning = true
+    task.spawn(function()
+        while AutoKen do
+            task.wait(0.1)
+            if Services.CollectionService:HasTag(player.Character, "Ken") then
+                local pg = player:FindFirstChild("PlayerGui")
+                if pg then
+                    local btn = pg:FindFirstChild("MobileContextButtons")
+                        and pg.MobileContextButtons.ContextButtonFrame:FindFirstChild("BoundActionKen")
+                    if btn and btn:GetAttribute("Selected") ~= true then
+                        btn:SetAttribute("Selected", true)
+                    end
+                end
+                local om = getrenv()._G.OM
+                if om and not om.active then
+                    om.radius = 0
+                    om:setActive(true)
+                    commE:FireServer("Ken", true)
+                end
+            end
+        end
+        autoKenRunning = false
+    end)
+end
+
+-- ================================================
+--  MINI TOGGLES
+-- ================================================
+local function createMiniToggle(name, position, stateRef, setter)
+    local pg = player:WaitForChild("PlayerGui")
+    if pg:FindFirstChild(name .. "NamelessMini") then
+        pg[name .. "NamelessMini"]:Destroy()
+    end
+    local sg = Instance.new("ScreenGui")
+    sg.Name = name .. "NamelessMini"
+    sg.ResetOnSpawn = false
+    sg.Parent = pg
+
+    local btn = Instance.new("TextButton")
+    btn.Size = UDim2.new(0, 70, 0, 40)
+    btn.Position = position
+    btn.TextScaled = true
+    btn.TextWrapped = false
+    btn.TextColor3 = Color3.new(1, 1, 1)
+    btn.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+    btn.BorderSizePixel = 0
+    btn.Parent = sg
+
+    Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 8)
+
+    local grad = Instance.new("UIGradient")
+    grad.Rotation = 45
+    grad.Parent = btn
+
+    local function refresh(s)
+        btn.Text = name .. (s and " ON" or " OFF")
+        grad.Color = ColorSequence.new{
+            ColorSequenceKeypoint.new(0, s and Color3.fromRGB(50, 200, 50) or Color3.fromRGB(255, 100, 50)),
+            ColorSequenceKeypoint.new(1, s and Color3.fromRGB(50, 255, 50) or Color3.fromRGB(255, 200, 50))
+        }
+    end
+
+    btn.MouseButton1Click:Connect(function()
+        stateRef.value = not stateRef.value
+        setter(stateRef.value)
+        refresh(stateRef.value)
+    end)
+
+    -- Draggable
+    local dragging, dragStart, startPos = false, nil, nil
+    btn.InputBegan:Connect(function(i)
+        if i.UserInputType == Enum.UserInputType.Touch or i.UserInputType == Enum.UserInputType.MouseButton1 then
+            dragging = true dragStart = i.Position startPos = btn.Position
+            i.Changed:Connect(function() if i.UserInputState == Enum.UserInputState.End then dragging = false end end)
+        end
+    end)
+    btn.InputChanged:Connect(function(i)
+        if dragging and (i.UserInputType == Enum.UserInputType.Touch or i.UserInputType == Enum.UserInputType.MouseMovement) then
+            local d = i.Position - dragStart
+            btn.Position = UDim2.new(0,
+                math.clamp(startPos.X.Offset + d.X, 0, camera.ViewportSize.X - btn.AbsoluteSize.X),
+                0,
+                math.clamp(startPos.Y.Offset + d.Y, 0, camera.ViewportSize.Y - btn.AbsoluteSize.Y))
+        end
+    end)
+
+    refresh(stateRef.value)
+    return sg
+end
+
+local function UpdateMiniState()
+    SilentAimPlayersEnabled = MiniPlayerState and MiniPlayerState.value or false
+    SilentAimNPCsEnabled    = MiniNpcState    and MiniNpcState.value    or false
+    UserWantsPlayerAim = SilentAimPlayersEnabled
+    UserWantsNPCAim    = SilentAimNPCsEnabled
+    if SilentAimPlayersEnabled or SilentAimNPCsEnabled then
+        startRenderLoop()
+    else
+        stopRenderLoop()
+        clearHighlight()
+    end
+end
+
+-- ================================================
+--  CHARACTER ADDED
+-- ================================================
+local function onCharacterAdded(char)
+    clearConnections()
+    sharkZActive = false vActive = false cursedZActive = false
+    godhumanZActive = false aimlockActive = false
+    rightVTouching = false rightZTouching = false
+    restoreSilentAim()
+
+    for _, c in ipairs(char:GetChildren()) do
+        if c:IsA("Tool") then hookTool(c) end
+    end
+    table.insert(characterConnections, char.ChildAdded:Connect(function(c)
+        if c:IsA("Tool") then hookTool(c) end
+    end))
+    table.insert(characterConnections, char.ChildRemoved:Connect(function(c)
+        if c == currentTool then
+            currentTool = nil lastTool = nil
+            sharkZActive = false vActive = false cursedZActive = false
+            godhumanZActive = false aimlockActive = false
+            restoreSilentAim()
+        end
+    end))
+    watchDamageCounter()
+end
+
+player.CharacterAdded:Connect(onCharacterAdded)
+if player.Character then onCharacterAdded(player.Character) end
+
+-- ================================================
+--  PUBLIC API
+-- ================================================
+
+-- Silent Aim Players
+function SilentAimModule:SetPlayerSilentAim(state)
+    UserWantsPlayerAim      = state
+    SilentAimPlayersEnabled = state
+    ZSkillsEnabled          = state  -- ZSkill auto-suit le silent aim
+    if state then
+        startRenderLoop()
+    else
+        if not SilentAimNPCsEnabled then stopRenderLoop() end
+        stopAimlock()
+    end
+end
+
+-- Silent Aim NPCs
+function SilentAimModule:SetNPCSilentAim(state)
+    UserWantsNPCAim      = state
+    SilentAimNPCsEnabled = state
+    if state then
+        startRenderLoop()
+    else
+        if not SilentAimPlayersEnabled then stopRenderLoop() end
+    end
+end
+
+-- Prediction
+function SilentAimModule:SetPrediction(state) PredictionEnabled = state end
+function SilentAimModule:SetPredictionAmount(n) if type(n) == "number" then PredictionAmount = n end end
+
+-- Distance
+function SilentAimModule:SetDistanceLimit(n) if type(n) == "number" then maxRange = n end end
+
+-- Highlight
+function SilentAimModule:SetHighlight(state)
+    HighlightEnabled = state
+    if not state then clearHighlight() end
+end
+function SilentAimModule:IsHighlightEnabled() return HighlightEnabled end
+
+-- Z/M1 Skills mode
+function SilentAimModule:SetZSkillorM1(state) ZSkillorM1 = state end
+
+-- Auto Ken
+function SilentAimModule:SetAutoKen(state)
+    AutoKen = state
+    if state then startAutoKenLoop() end
+end
+
+-- Selected player
+function SilentAimModule:SetSelectedPlayer(name)
+    if not name or name == "" then Selectedplayer = nil return end
+    local f = Players:FindFirstChild(name)
+    if f then Selectedplayer = f end
+end
+function SilentAimModule:GetSelectedPlayer()
+    return Selectedplayer and Selectedplayer.Name or "None"
+end
+
+-- Target Info UI
+function SilentAimModule:SetInfo(state)
+    TargetInfo = state
+    if state then
+        if not uiInfoConn then
+            uiInfoConn = RunService.RenderStepped:Connect(function()
+                local target = getNearest(1000)
+                if target and target:FindFirstChildOfClass("Humanoid") then
+                    local hum = target:FindFirstChildOfClass("Humanoid")
+                    targetNameLabel.Text = target.Name
+                    hpFill.Size = UDim2.new(math.clamp(hum.Health / hum.MaxHealth, 0, 1), 0, 1, 0)
+                    hpBg.Visible = true hpFill.Visible = true targetFrame.Visible = true
+                else
+                    targetNameLabel.Text = "No target"
+                    hpBg.Visible = false hpFill.Visible = false targetFrame.Visible = true
+                end
+            end)
+        end
+    else
+        if uiInfoConn then uiInfoConn:Disconnect() uiInfoConn = nil end
+        targetFrame.Visible = false
+    end
+end
+
+-- Pause / Restore (internal use / external)
+function SilentAimModule:Pause()
+    SilentAimPlayersEnabled = false
+    SilentAimNPCsEnabled    = false
+end
+function SilentAimModule:Restore()
+    SilentAimPlayersEnabled = UserWantsPlayerAim
+    SilentAimNPCsEnabled    = UserWantsNPCAim
+end
+
+function SilentAimModule:IsPlayerAimEnabled() return SilentAimPlayersEnabled end
+function SilentAimModule:IsNPCAimEnabled()    return SilentAimNPCsEnabled    end
+
+-- Mini toggles
+function SilentAimModule:SetMiniTogglePlayerSilentAim(state)
+    if not MiniPlayerCreated and state then
+        MiniPlayerState = { value = SilentAimPlayersEnabled }
+        MiniPlayerGui   = createMiniToggle("Player", UDim2.new(0, 10, 0, 90), MiniPlayerState, function(v)
+            MiniPlayerState.value = v
+            UpdateMiniState()
+        end)
+        MiniPlayerCreated = true
+    elseif MiniPlayerCreated and MiniPlayerGui then
+        MiniPlayerGui.Enabled = state
+    end
+end
+
+function SilentAimModule:SetMiniToggleNpcSilentAim(state)
+    if not MiniNpcCreated and state then
+        MiniNpcState = { value = SilentAimNPCsEnabled }
+        MiniNpcGui   = createMiniToggle("NPC", UDim2.new(0, 10, 0, 50), MiniNpcState, function(v)
+            MiniNpcState.value = v
+            UpdateMiniState()
+        end)
+        MiniNpcCreated = true
+    elseif MiniNpcCreated and MiniNpcGui then
+        MiniNpcGui.Enabled = state
+    end
+end
+
+return SilentAimModule
