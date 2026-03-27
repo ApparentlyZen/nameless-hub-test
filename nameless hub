@@ -1,5 +1,6 @@
 -- ================================================
---  Nameless Client — By HimselfZen
+--  Nameless Client — Silent Aim (M1 COMPLÈTEMENT DÉSACTIVÉS)
+--  Version finale : exclusion des InvokeServer "TAP" + suppression MouseMod
 -- ================================================
 
 local Library = loadstring(game:HttpGet(
@@ -16,7 +17,7 @@ for _, f in { Library.Folders.Directory, Library.Folders.Configs, Library.Folder
 end
 
 -- ================================================
---  SILENT AIM (intégré directement)
+--  SILENT AIM MODULE (M1 COMPLÈTEMENT SUPPRIMÉS)
 -- ================================================
 local SA = (function()
     local M = {}
@@ -29,7 +30,8 @@ local SA = (function()
     local lp       = Players.LocalPlayer
     local cam      = workspace.CurrentCamera
     local commE    = RS:WaitForChild("Remotes"):WaitForChild("CommE")
-    local MouseMod = RS:FindFirstChild("Mouse")
+    -- On ne va plus utiliser MouseMod pour éviter d'affecter les M1
+    -- local MouseMod = RS:FindFirstChild("Mouse")
 
     local Services = setmetatable({}, {
         __index = function(t, k)
@@ -46,12 +48,12 @@ local SA = (function()
     local PredOn         = false
     local HighlightOn    = false
     local AutoKenOn      = false
-    local ZM1On          = false
+    local ZSkillsOn      = false  -- uniquement pour les compétences Z
     local autoKenRunning = false
     local maxRange       = 1000
     local predAmt        = 0.1
     local Selected       = nil
-    local tapPaused      = false  -- pause SA pendant TAP (Portal)
+    local tapPaused      = false
 
     local renderConn   = nil
     local curHighlight = nil
@@ -59,7 +61,6 @@ local SA = (function()
     local PlPos        = nil
     local NPCPos       = nil
 
-    local ZSkillsOn  = false
     local godZ       = false
     local aimOn      = false
     local aimTarget  = nil
@@ -179,7 +180,7 @@ local SA = (function()
         curHighlight = h curTgtType = ttype
     end
 
-    -- RENDER LOOP
+    -- RENDER LOOP (met à jour les positions cibles, sans toucher à la souris)
     local function stopLoop()
         if renderConn then pcall(function() renderConn:Disconnect() end) renderConn = nil end
         PlPos = nil NPCPos = nil clearHL()
@@ -189,7 +190,7 @@ local SA = (function()
         if renderConn then return end
         renderConn = RnSvc.Heartbeat:Connect(function()
             if not SAPlayersOn and not SANPCsOn then return end
-            if tapPaused then return end  -- Portal TAP en cours, on ne redirige pas
+            if tapPaused then return end
 
             local char  = lp.Character
             local lpHRP = char and getHRP(char)
@@ -199,22 +200,38 @@ local SA = (function()
                 local t = closestPlayer(lpHRP)
                 if t and t.Character then
                     local hrp = getHRP(t.Character)
-                    if hrp then PlPos = predicted(hrp) applyHL(t.Character,"Player") end
-                else PlPos = nil if curTgtType=="Player" then clearHL() end end
-            else PlPos = nil end
+                    if hrp then
+                        PlPos = predicted(hrp)
+                        applyHL(t.Character, "Player")
+                    end
+                else
+                    PlPos = nil
+                    if curTgtType == "Player" then clearHL() end
+                end
+            else
+                PlPos = nil
+            end
 
-            if SANPCsOn and not PlPos then
+            if SANPCsOn then
                 local n = closestNPC(lpHRP)
                 if n then
                     local hrp = getHRP(n)
-                    if hrp then NPCPos = predicted(hrp) applyHL(n,"NPC") end
-                else NPCPos = nil if curTgtType=="NPC" then clearHL() end end
-            else if not SAPlayersOn then NPCPos = nil end end
+                    if hrp then
+                        NPCPos = predicted(hrp)
+                        if not PlPos then
+                            applyHL(n, "NPC")
+                        end
+                    end
+                else
+                    NPCPos = nil
+                    if curTgtType == "NPC" then clearHL() end
+                end
+            else
+                NPCPos = nil
+            end
 
-            local tgt = PlPos and CFrame.new(PlPos) or NPCPos and CFrame.new(NPCPos)
-            if tgt and MouseMod then
-                local ok, md = pcall(require, MouseMod)
-                if ok and type(md)=="table" then md.Hit = tgt md.Target = nil end
+            if not SAPlayersOn and not SANPCsOn then
+                clearHL()
             end
         end)
     end
@@ -222,7 +239,7 @@ local SA = (function()
     -- VSKILL pause/restore
     local function pauseSA()   SAPlayersOn = false SANPCsOn = false end
     local function restoreSA()
-        if tapPaused then return end  -- pas de restore si TAP en cours
+        if tapPaused then return end
         SAPlayersOn = WantsPlayers SANPCsOn = WantsNPCs
     end
 
@@ -232,7 +249,7 @@ local SA = (function()
             or (curTool and curTool.Name == "Cursed Dual Katana" and cursedZ)
     end
 
-    -- ZSKILL aimlock
+    -- ZSKILL aimlock (purement visuel, sans redirection)
     local function getNearestEnemy(d)
         local char = lp.Character local hrp = char and getHRP(char) if not hrp then return nil end
         local best, bd = nil, d or 1000
@@ -345,35 +362,42 @@ local SA = (function()
         end))
     end
 
-    -- NAMECALL HOOK
+    -- ============================================
+    -- NAMECALL HOOK - Exclusion du M1 (InvokeServer "TAP")
+    -- ============================================
     if not getgenv().NamelessHooked then
         getgenv().NamelessHooked = true
         local old
         old = hookmetamethod(game, "__namecall", function(self, ...)
             local method = getnamecallmethod()
             local args   = { ... }
+            
+            -- EXCLUSION : si c'est un InvokeServer avec "TAP" (M1)
+            if method == "InvokeServer" and args[1] == "TAP" then
+                return old(self, ...)   -- Ne pas modifier, laisser passer
+            end
+            
             if method == "InvokeServer" or method == "FireServer" then
                 local a1 = args[1]
+                
+                -- REDIRECTION UNIQUEMENT POUR LES COMPÉTENCES Z
+                if ZSkillsOn and typeof(a1) == "string" and a1:upper() == "Z" then
+                    -- Rediriger la compétence Z vers la position de la cible
+                    if PlPos then
+                        return old(self, "Z", PlPos, ...)
+                    elseif NPCPos then
+                        return old(self, "Z", NPCPos, ...)
+                    end
+                end
+                
+                -- Gestion des skills spéciaux (Godhuman, Shark Anchor, etc.)
                 if typeof(a1) == "string" then
                     local up = a1:upper()
-
-                    -- TAP = click Portal → on pause SA brièvement pour pas rediriger le portail
-                    if up == "TAP" then
-                        tapPaused = true
-                        task.delay(0.3, function()
-                            tapPaused = false
-                        end)
-                        return old(self, ...)  -- fire direct sans aucune interférence SA
-                    end
-
-                    -- Skills Z
                     if up == "Z" and curTool then
                         if curTool.Name == "Godhuman"           then godZ   = true end
                         if curTool.Name == "Shark Anchor"       then sharkZ = true end
                         if curTool.Name == "Cursed Dual Katana" then cursedZ = true end
                     end
-
-                    -- Dough V
                     if up == "V" and lastTool == "Dough-Dough" then doughV = true end
                 end
             end
@@ -402,7 +426,7 @@ local SA = (function()
         end)
     end
 
-    -- MINI TOGGLES
+    -- MINI TOGGLES (conservés)
     local function createMini(name, pos, stateRef, setter)
         local pg = lp:WaitForChild("PlayerGui")
         if pg:FindFirstChild(name.."NML") then pg[name.."NML"]:Destroy() end
@@ -474,7 +498,7 @@ local SA = (function()
 
     -- PUBLIC API
     function M:SetPlayerSilentAim(state)
-        WantsPlayers = state SAPlayersOn = state ZSkillsOn = state
+        WantsPlayers = state SAPlayersOn = state
         if state then startLoop() else if not SANPCsOn then stopLoop() end stopAimlock() end
     end
     function M:SetNPCSilentAim(state)
@@ -485,7 +509,7 @@ local SA = (function()
     function M:SetPredictionAmount(n)    if type(n)=="number" then predAmt = n end end
     function M:SetDistanceLimit(n)       if type(n)=="number" then maxRange = n end end
     function M:SetHighlight(state)       HighlightOn = state if not state then clearHL() end end
-    function M:SetZSkillorM1(state)      ZM1On = state end
+    function M:SetZSkills(state)         ZSkillsOn = state end
     function M:SetAutoKen(state)         AutoKenOn = state if state then startAutoKen() end end
     function M:SetSelectedPlayer(name)
         if not name or name=="" then Selected=nil return end
@@ -533,14 +557,14 @@ local SA = (function()
 end)()
 
 -- ================================================
---  WINDOW
+--  WINDOW (interface nameless_lib)
 -- ================================================
 local Players = game:GetService("Players")
 local lp      = Players.LocalPlayer
 
 local Window = Library:Window({
     Name    = "Nameless Client",
-    SubName = "By HimselfZen",
+    SubName = "Silent Aim (Z Skills only - M1 désactivés)",
     Logo    = "81786914450484"
 })
 
@@ -549,27 +573,27 @@ Library:Watermark({ "Nameless Client", "|", "Blox Fruits" })
 if Library.WatermarkFrame then Library.WatermarkFrame.Instance.Visible = true end
 
 -- ══════════════════════════════════════════════
---  TAB 1 — LEGIT
+--  TAB 1 — SILENT AIM
 -- ══════════════════════════════════════════════
-local PageLegit = Window:Page({ Name = "Legit", Icon = "131319188753430" })
+local PageSA = Window:Page({ Name = "Silent Aim", Icon = "131319188753430" })
 
--- Silent Aim (col 1)
-local SecSA = PageLegit:Section({ Name = "Silent Aim", Side = 1, Icon = "131319188753430" })
+-- Colonne gauche
+local SecMain = PageSA:Section({ Name = "Main", Side = 1, Icon = "131319188753430" })
 
-SecSA:Toggle({ Name="Silent Aim Players",    Flag="SAPlayers",   Default=false, Callback=function(v) SA:SetPlayerSilentAim(v) end })
-SecSA:Toggle({ Name="Silent Aim NPCs",       Flag="SANpcs",      Default=false, Callback=function(v) SA:SetNPCSilentAim(v) end })
-SecSA:Toggle({ Name="Z / M1 Skills",         Flag="ZM1",         Default=false, Callback=function(v) SA:SetZSkillorM1(v) end })
-SecSA:Toggle({ Name="Prediction",            Flag="SAPred",      Default=false, Callback=function(v) SA:SetPrediction(v) end })
-SecSA:Slider({ Name="Prediction Amount", Flag="SAPredAmt", Min=0.1, Max=0.5, Default=0.1, Decimals=0.01, Suffix="s",
+SecMain:Toggle({ Name="Silent Aim Players",    Flag="SAPlayers",   Default=false, Callback=function(v) SA:SetPlayerSilentAim(v) end })
+SecMain:Toggle({ Name="Silent Aim NPCs",       Flag="SANpcs",      Default=false, Callback=function(v) SA:SetNPCSilentAim(v) end })
+SecMain:Toggle({ Name="Z Skills (Godhuman, Shark Anchor, Cursed Katana)", Flag="ZSkills", Default=false, Callback=function(v) SA:SetZSkills(v) end })
+SecMain:Toggle({ Name="Prediction",            Flag="SAPred",      Default=false, Callback=function(v) SA:SetPrediction(v) end })
+SecMain:Slider({ Name="Prediction Amount", Flag="SAPredAmt", Min=0.05, Max=0.5, Default=0.1, Decimals=0.01, Suffix="s",
     Callback=function(v) SA:SetPredictionAmount(v) end })
-SecSA:Slider({ Name="Distance Limit",    Flag="SADist",    Min=100, Max=1000, Default=1000, Decimals=50, Suffix="m",
+SecMain:Slider({ Name="Distance Limit",    Flag="SADist",    Min=100, Max=1000, Default=1000, Decimals=50, Suffix="m",
     Callback=function(v) SA:SetDistanceLimit(v) end })
-SecSA:Toggle({ Name="Target Highlight",      Flag="SAHighlight", Default=false, Callback=function(v) SA:SetHighlight(v) end })
-SecSA:Toggle({ Name="Target Info (Name/HP)", Flag="SAInfo",      Default=false, Callback=function(v) SA:SetInfo(v) end })
+SecMain:Toggle({ Name="Target Highlight",      Flag="SAHighlight", Default=false, Callback=function(v) SA:SetHighlight(v) end })
+SecMain:Toggle({ Name="Target Info (Name/HP)", Flag="SAInfo",      Default=false, Callback=function(v) SA:SetInfo(v) end })
 
 local PlayerList = { "None" }
 for _, pl in ipairs(Players:GetPlayers()) do if pl ~= lp then table.insert(PlayerList, pl.Name) end end
-local PlayerDrop = SecSA:Dropdown({
+local PlayerDrop = SecMain:Dropdown({
     Name="Lock On Player", Flag="SALock", Items=PlayerList, Default="None",
     Callback=function(v) SA:SetSelectedPlayer(v=="None" and nil or v) end
 })
@@ -581,19 +605,18 @@ end
 Players.PlayerAdded:Connect(RefreshPlayers)
 Players.PlayerRemoving:Connect(RefreshPlayers)
 
-SecSA:Toggle({ Name="Mini Toggle Players", Flag="SAMiniP", Default=false, Callback=function(v) SA:SetMiniTogglePlayerSilentAim(v) end })
-SecSA:Toggle({ Name="Mini Toggle NPCs",    Flag="SAMiniN", Default=false, Callback=function(v) SA:SetMiniToggleNpcSilentAim(v) end })
+SecMain:Toggle({ Name="Mini Toggle Players", Flag="SAMiniP", Default=false, Callback=function(v) SA:SetMiniTogglePlayerSilentAim(v) end })
+SecMain:Toggle({ Name="Mini Toggle NPCs",    Flag="SAMiniN", Default=false, Callback=function(v) SA:SetMiniToggleNpcSilentAim(v) end })
 
--- Combat (col 2) — seulement Auto Ken
-local SecCombat = PageLegit:Section({ Name = "Combat", Side = 2, Icon = "131319188753430" })
+-- Colonne droite : Auto Ken
+local SecCombat = PageSA:Section({ Name = "Combat", Side = 2, Icon = "131319188753430" })
 SecCombat:Toggle({ Name="Auto Ken", Flag="AutoKen", Default=false, Callback=function(v) SA:SetAutoKen(v) end })
 
 -- ══════════════════════════════════════════════
---  TAB 2 — VISUAL
+--  TAB 2 — VISUAL (exemple)
 -- ══════════════════════════════════════════════
 local PageVisual = Window:Page({ Name = "Visual", Icon = "122669828593160" })
 
--- seulement Remove Lava
 local SecWorld = PageVisual:Section({ Name = "World", Side = 1, Icon = "73789337996373" })
 SecWorld:Toggle({
     Name="Remove Lava", Flag="NoLava", Default=false,
@@ -609,7 +632,6 @@ SecWorld:Toggle({
 -- ══════════════════════════════════════════════
 local PagePlayer = Window:Page({ Name = "Player", Icon = "81598136527047" })
 
--- seulement Infinite Jump + Jump Power
 local SecChar = PagePlayer:Section({ Name = "Character", Side = 1, Icon = "81598136527047" })
 
 SecChar:Toggle({
@@ -647,7 +669,7 @@ Window:Init()
 
 Library:Notification({
     Title       = "Nameless Client",
-    Description = "Loaded! By HimselfZen",
+    Description = "Silent Aim chargé - M1 exclus (InvokeServer TAP ignoré) + suppression MouseMod",
     Duration    = 3,
     Icon        = "73789337996373"
 })
