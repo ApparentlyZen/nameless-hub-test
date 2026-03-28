@@ -1311,8 +1311,8 @@ SAPlayersBox:AddToggle("Highlight", {
 })
 
 local playerNames = {"None"}
-for _, p in pairs(Players:GetPlayers()) do
-    if p ~= player then table.insert(playerNames, p.Name) end
+for _, pl in ipairs(Players:GetPlayers()) do
+    if pl ~= player then table.insert(playerNames, pl.Name) end
 end
 Players.PlayerAdded:Connect(function(p)
     if p ~= player then table.insert(playerNames, p.Name) end
