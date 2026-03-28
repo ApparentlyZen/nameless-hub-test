@@ -1,6 +1,6 @@
 -- ================================================
---  Nameless Client — Silent Aim (M1 COMPLÈTEMENT DÉSACTIVÉS)
---  Version finale : exclusion des InvokeServer "TAP" + suppression MouseMod
+--  Nameless Client — All-in-One
+--  Created by HimselfZen
 -- ================================================
 
 local Library = loadstring(game:HttpGet(
@@ -17,28 +17,26 @@ for _, f in { Library.Folders.Directory, Library.Folders.Configs, Library.Folder
 end
 
 -- ================================================
---  SILENT AIM MODULE (M1 COMPLÈTEMENT SUPPRIMÉS)
+--  SERVICES
+-- ================================================
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local RS = game:GetService("ReplicatedStorage")
+local lp = Players.LocalPlayer
+local cam = workspace.CurrentCamera
+local Mouse = lp:GetMouse()
+local commE = RS:FindFirstChild("Remotes") and RS.Remotes:FindFirstChild("CommE")
+local MouseMod = RS:FindFirstChild("Mouse")
+
+-- ================================================
+--  SILENT AIM MODULE (Z/X/C/V/F only, M1 excluded)
 -- ================================================
 local SA = (function()
     local M = {}
-
-    local Players = game:GetService("Players")
-    local UIS     = game:GetService("UserInputService")
-    local RnSvc   = game:GetService("RunService")
-    local RS      = game:GetService("ReplicatedStorage")
-
-    local lp       = Players.LocalPlayer
-    local cam      = workspace.CurrentCamera
-    local commE    = RS:WaitForChild("Remotes"):WaitForChild("CommE")
-    -- On ne va plus utiliser MouseMod pour éviter d'affecter les M1
-    -- local MouseMod = RS:FindFirstChild("Mouse")
-
-    local Services = setmetatable({}, {
-        __index = function(t, k)
-            local ok, s = pcall(game.GetService, game, k)
-            if ok then t[k] = s return s end
-        end
-    })
+    
+    local UIS = UserInputService
+    local RnSvc = RunService
 
     -- STATE
     local SAPlayersOn    = false
@@ -47,13 +45,11 @@ local SA = (function()
     local WantsNPCs      = false
     local PredOn         = false
     local HighlightOn    = false
-    local AutoKenOn      = false
-    local ZSkillsOn      = false  -- uniquement pour les compétences Z
-    local autoKenRunning = false
+    local ZSkillsOn      = false
     local maxRange       = 1000
     local predAmt        = 0.1
     local Selected       = nil
-    local tapPaused      = false
+    local zSkillActive   = false  -- SA actif seulement pendant Z/X/C/V/F
 
     local renderConn   = nil
     local curHighlight = nil
@@ -80,8 +76,24 @@ local SA = (function()
 
     local MiniPCreated = false
     local MiniNCreated = false
-    local MiniPGui, MiniNGui       = nil, nil
-    local MiniPState, MiniNState   = nil, nil
+    local MiniPGui, MiniNGui = nil, nil
+    local MiniPState, MiniNState = nil, nil
+
+    -- Target Info UI
+    local sg = Instance.new("ScreenGui")
+    sg.Name = "NamelessTargetUI" sg.ResetOnSpawn = false sg.Parent = lp:WaitForChild("PlayerGui")
+    local tf = Instance.new("Frame")
+    tf.Size = UDim2.new(0.25,0,0.08,0) tf.Position = UDim2.new(0.5,0,0.05,0)
+    tf.AnchorPoint = Vector2.new(0.5,0) tf.BackgroundTransparency = 1 tf.Visible = false tf.Parent = sg
+    local tnl = Instance.new("TextLabel")
+    tnl.Size = UDim2.new(1,0,0.5,0) tnl.BackgroundTransparency = 1 tnl.TextScaled = true
+    tnl.Font = Enum.Font.GothamBold tnl.TextColor3 = Color3.new(1,1,1) tnl.Parent = tf
+    local hpbg = Instance.new("Frame")
+    hpbg.Size = UDim2.new(1,0,0.35,0) hpbg.Position = UDim2.new(0,0,0.55,0)
+    hpbg.BackgroundColor3 = Color3.fromRGB(40,40,40) hpbg.BorderSizePixel = 0 hpbg.Parent = tf
+    local hpf = Instance.new("Frame")
+    hpf.Size = UDim2.new(1,0,1,0) hpf.BackgroundColor3 = Color3.fromRGB(0,255,0)
+    hpf.BorderSizePixel = 0 hpf.Parent = hpbg
 
     -- HELPERS
     local function getHRP(m) return m and m:FindFirstChild("HumanoidRootPart") end
@@ -89,8 +101,8 @@ local SA = (function()
     local function clearConns()
         for _, c in ipairs(charConns) do pcall(function() c:Disconnect() end) end
         charConns = {}
-        if dmgConn   then pcall(function() dmgConn:Disconnect() end)     dmgConn = nil end
-        if aimRender  then pcall(function() aimRender:Disconnect() end)  aimRender = nil end
+        if dmgConn then pcall(function() dmgConn:Disconnect() end) dmgConn = nil end
+        if aimRender then pcall(function() aimRender:Disconnect() end) aimRender = nil end
         if aimTimeout then pcall(function() task.cancel(aimTimeout) end) aimTimeout = nil end
     end
 
@@ -172,15 +184,15 @@ local SA = (function()
         if curHighlight and curHighlight.Adornee == model then return end
         clearHL()
         local h = Instance.new("Highlight")
-        h.FillTransparency    = 0.5
+        h.FillTransparency = 0.5
         h.OutlineTransparency = 0
-        h.FillColor    = ttype == "Player" and Color3.fromRGB(255,50,50) or Color3.fromRGB(255,165,0)
+        h.FillColor = ttype == "Player" and Color3.fromRGB(255,50,50) or Color3.fromRGB(255,165,0)
         h.OutlineColor = Color3.new(1,1,1)
         h.Adornee = model h.Parent = model
         curHighlight = h curTgtType = ttype
     end
 
-    -- RENDER LOOP (met à jour les positions cibles, sans toucher à la souris)
+    -- RENDER LOOP
     local function stopLoop()
         if renderConn then pcall(function() renderConn:Disconnect() end) renderConn = nil end
         PlPos = nil NPCPos = nil clearHL()
@@ -190,9 +202,9 @@ local SA = (function()
         if renderConn then return end
         renderConn = RnSvc.Heartbeat:Connect(function()
             if not SAPlayersOn and not SANPCsOn then return end
-            if tapPaused then return end
+            if not zSkillActive then return end
 
-            local char  = lp.Character
+            local char = lp.Character
             local lpHRP = char and getHRP(char)
             if not lpHRP then return end
 
@@ -200,38 +212,22 @@ local SA = (function()
                 local t = closestPlayer(lpHRP)
                 if t and t.Character then
                     local hrp = getHRP(t.Character)
-                    if hrp then
-                        PlPos = predicted(hrp)
-                        applyHL(t.Character, "Player")
-                    end
-                else
-                    PlPos = nil
-                    if curTgtType == "Player" then clearHL() end
-                end
-            else
-                PlPos = nil
-            end
+                    if hrp then PlPos = predicted(hrp) applyHL(t.Character,"Player") end
+                else PlPos = nil if curTgtType=="Player" then clearHL() end end
+            else PlPos = nil end
 
-            if SANPCsOn then
+            if SANPCsOn and not PlPos then
                 local n = closestNPC(lpHRP)
                 if n then
                     local hrp = getHRP(n)
-                    if hrp then
-                        NPCPos = predicted(hrp)
-                        if not PlPos then
-                            applyHL(n, "NPC")
-                        end
-                    end
-                else
-                    NPCPos = nil
-                    if curTgtType == "NPC" then clearHL() end
-                end
-            else
-                NPCPos = nil
-            end
+                    if hrp then NPCPos = predicted(hrp) applyHL(n,"NPC") end
+                else NPCPos = nil if curTgtType=="NPC" then clearHL() end end
+            else if not SAPlayersOn then NPCPos = nil end end
 
-            if not SAPlayersOn and not SANPCsOn then
-                clearHL()
+            local tgt = PlPos and CFrame.new(PlPos) or NPCPos and CFrame.new(NPCPos)
+            if tgt and MouseMod then
+                local ok, md = pcall(require, MouseMod)
+                if ok and type(md)=="table" then md.Hit = tgt md.Target = nil end
             end
         end)
     end
@@ -239,7 +235,6 @@ local SA = (function()
     -- VSKILL pause/restore
     local function pauseSA()   SAPlayersOn = false SANPCsOn = false end
     local function restoreSA()
-        if tapPaused then return end
         SAPlayersOn = WantsPlayers SANPCsOn = WantsNPCs
     end
 
@@ -249,7 +244,7 @@ local SA = (function()
             or (curTool and curTool.Name == "Cursed Dual Katana" and cursedZ)
     end
 
-    -- ZSKILL aimlock (purement visuel, sans redirection)
+    -- ZSKILL aimlock
     local function getNearestEnemy(d)
         local char = lp.Character local hrp = char and getHRP(char) if not hrp then return nil end
         local best, bd = nil, d or 1000
@@ -269,7 +264,7 @@ local SA = (function()
     local function stopAimlock()
         if not aimOn then return end
         aimOn = false aimTarget = nil godZ = false
-        if aimRender  then pcall(function() aimRender:Disconnect() end)  aimRender = nil end
+        if aimRender then pcall(function() aimRender:Disconnect() end) aimRender = nil end
         if aimTimeout then pcall(function() task.cancel(aimTimeout) end) aimTimeout = nil end
     end
 
@@ -285,22 +280,6 @@ local SA = (function()
         end)
         aimTimeout = task.delay(1, function() if aimOn then stopAimlock() end end)
     end
-
-    -- TARGET INFO UI
-    local sg = Instance.new("ScreenGui")
-    sg.Name = "NamelessTargetUI" sg.ResetOnSpawn = false sg.Parent = lp:WaitForChild("PlayerGui")
-    local tf = Instance.new("Frame")
-    tf.Size = UDim2.new(0.25,0,0.08,0) tf.Position = UDim2.new(0.5,0,0.05,0)
-    tf.AnchorPoint = Vector2.new(0.5,0) tf.BackgroundTransparency = 1 tf.Visible = false tf.Parent = sg
-    local tnl = Instance.new("TextLabel")
-    tnl.Size = UDim2.new(1,0,0.5,0) tnl.BackgroundTransparency = 1 tnl.TextScaled = true
-    tnl.Font = Enum.Font.GothamBold tnl.TextColor3 = Color3.new(1,1,1) tnl.Parent = tf
-    local hpbg = Instance.new("Frame")
-    hpbg.Size = UDim2.new(1,0,0.35,0) hpbg.Position = UDim2.new(0,0,0.55,0)
-    hpbg.BackgroundColor3 = Color3.fromRGB(40,40,40) hpbg.BorderSizePixel = 0 hpbg.Parent = tf
-    local hpf = Instance.new("Frame")
-    hpf.Size = UDim2.new(1,0,1,0) hpf.BackgroundColor3 = Color3.fromRGB(0,255,0)
-    hpf.BorderSizePixel = 0 hpf.Parent = hpbg
 
     -- DAMAGE WATCH
     local function watchDMG()
@@ -327,7 +306,7 @@ local SA = (function()
         end)
     end
 
-    -- TOUCH
+    -- TOUCH (pour VSkills)
     UIS.TouchStarted:Connect(function(t)
         if not cam then return end
         if t.Position.X > cam.ViewportSize.X / 2 then
@@ -362,40 +341,29 @@ local SA = (function()
         end))
     end
 
-    -- ============================================
-    -- NAMECALL HOOK - Exclusion du M1 (InvokeServer "TAP")
-    -- ============================================
+    -- NAMECALL HOOK (Z/X/C/V/F)
     if not getgenv().NamelessHooked then
         getgenv().NamelessHooked = true
         local old
         old = hookmetamethod(game, "__namecall", function(self, ...)
             local method = getnamecallmethod()
-            local args   = { ... }
-            
-            -- EXCLUSION : si c'est un InvokeServer avec "TAP" (M1)
-            if method == "InvokeServer" and args[1] == "TAP" then
-                return old(self, ...)   -- Ne pas modifier, laisser passer
-            end
-            
+            local args = { ... }
             if method == "InvokeServer" or method == "FireServer" then
                 local a1 = args[1]
-                
-                -- REDIRECTION UNIQUEMENT POUR LES COMPÉTENCES Z
-                if ZSkillsOn and typeof(a1) == "string" and a1:upper() == "Z" then
-                    -- Rediriger la compétence Z vers la position de la cible
-                    if PlPos then
-                        return old(self, "Z", PlPos, ...)
-                    elseif NPCPos then
-                        return old(self, "Z", NPCPos, ...)
-                    end
-                end
-                
-                -- Gestion des skills spéciaux (Godhuman, Shark Anchor, etc.)
                 if typeof(a1) == "string" then
                     local up = a1:upper()
+                    if up == "Z" or up == "X" or up == "C" or up == "V" or up == "F" then
+                        zSkillActive = true
+                        if ZSkillsOn and (PlPos or NPCPos) then
+                            local targetPos = PlPos or NPCPos
+                            task.delay(1, function() zSkillActive = false end)
+                            return old(self, up, targetPos, ...)
+                        end
+                        task.delay(1, function() zSkillActive = false end)
+                    end
                     if up == "Z" and curTool then
-                        if curTool.Name == "Godhuman"           then godZ   = true end
-                        if curTool.Name == "Shark Anchor"       then sharkZ = true end
+                        if curTool.Name == "Godhuman" then godZ = true end
+                        if curTool.Name == "Shark Anchor" then sharkZ = true end
                         if curTool.Name == "Cursed Dual Katana" then cursedZ = true end
                     end
                     if up == "V" and lastTool == "Dough-Dough" then doughV = true end
@@ -405,28 +373,7 @@ local SA = (function()
         end)
     end
 
-    -- AUTO KEN
-    local function startAutoKen()
-        if autoKenRunning then return end autoKenRunning = true
-        task.spawn(function()
-            while AutoKenOn do
-                task.wait(0.1)
-                if lp.Character and Services.CollectionService:HasTag(lp.Character, "Ken") then
-                    local pg = lp:FindFirstChild("PlayerGui")
-                    if pg then
-                        local btn = pg:FindFirstChild("MobileContextButtons")
-                            and pg.MobileContextButtons.ContextButtonFrame:FindFirstChild("BoundActionKen")
-                        if btn and btn:GetAttribute("Selected") ~= true then btn:SetAttribute("Selected", true) end
-                    end
-                    local om = getrenv()._G.OM
-                    if om and not om.active then om.radius=0 om:setActive(true) commE:FireServer("Ken",true) end
-                end
-            end
-            autoKenRunning = false
-        end)
-    end
-
-    -- MINI TOGGLES (conservés)
+    -- MINI TOGGLES
     local function createMini(name, pos, stateRef, setter)
         local pg = lp:WaitForChild("PlayerGui")
         if pg:FindFirstChild(name.."NML") then pg[name.."NML"]:Destroy() end
@@ -468,7 +415,7 @@ local SA = (function()
 
     local function updateMini()
         SAPlayersOn = MiniPState and MiniPState.value or false
-        SANPCsOn    = MiniNState and MiniNState.value or false
+        SANPCsOn = MiniNState and MiniNState.value or false
         WantsPlayers = SAPlayersOn WantsNPCs = SANPCsOn
         if SAPlayersOn or SANPCsOn then startLoop() else stopLoop() clearHL() end
     end
@@ -477,7 +424,7 @@ local SA = (function()
     local function onCharAdded(char)
         clearConns()
         sharkZ=false doughV=false cursedZ=false
-        godZ=false aimOn=false rightTouch=false tapPaused=false
+        godZ=false aimOn=false rightTouch=false zSkillActive=false
         restoreSA()
         for _, c in ipairs(char:GetChildren()) do if c:IsA("Tool") then hookTool(c) end end
         table.insert(charConns, char.ChildAdded:Connect(function(c)
@@ -505,12 +452,11 @@ local SA = (function()
         WantsNPCs = state SANPCsOn = state
         if state then startLoop() else if not SAPlayersOn then stopLoop() end end
     end
-    function M:SetPrediction(state)      PredOn = state end
-    function M:SetPredictionAmount(n)    if type(n)=="number" then predAmt = n end end
-    function M:SetDistanceLimit(n)       if type(n)=="number" then maxRange = n end end
-    function M:SetHighlight(state)       HighlightOn = state if not state then clearHL() end end
-    function M:SetZSkills(state)         ZSkillsOn = state end
-    function M:SetAutoKen(state)         AutoKenOn = state if state then startAutoKen() end end
+    function M:SetPrediction(state) PredOn = state end
+    function M:SetPredictionAmount(n) if type(n)=="number" then predAmt = n end end
+    function M:SetDistanceLimit(n) if type(n)=="number" then maxRange = n end end
+    function M:SetHighlight(state) HighlightOn = state if not state then clearHL() end end
+    function M:SetZSkills(state) ZSkillsOn = state end
     function M:SetSelectedPlayer(name)
         if not name or name=="" then Selected=nil return end
         local f = Players:FindFirstChild(name) if f then Selected=f end
@@ -557,43 +503,1027 @@ local SA = (function()
 end)()
 
 -- ================================================
---  WINDOW (interface nameless_lib)
+--  SORU AUTO AIM MODULE
 -- ================================================
-local Players = game:GetService("Players")
-local lp      = Players.LocalPlayer
+local SoruAutoAim = (function()
+    local Enabled = false
+    local SelectedPlayer = nil
+    local CurrentTarget = nil
+    local function isEnemy(tp)
+        if not tp or tp == lp then return false end
+        local mt, tt = lp.Team, tp.Team
+        if mt and tt then
+            if mt.Name == "Pirates" and tt.Name == "Marines" then return true end
+            if mt.Name == "Marines" and tt.Name == "Pirates" then return true end
+            if mt.Name == "Pirates" and tt.Name == "Pirates" then
+                local g = lp:FindFirstChild("PlayerGui")
+                if g and g:FindFirstChild("Main") and g.Main:FindFirstChild("Allies") then
+                    local allies = g.Main.Allies:FindFirstChild("Container")
+                    if allies then
+                        local scroll = allies:FindFirstChild("Allies") and allies.Allies:FindFirstChild("ScrollingFrame")
+                        if scroll then
+                            for _, btn in pairs(scroll:GetDescendants()) do
+                                if btn:IsA("ImageButton") and btn.Name == tp.Name then return false end
+                            end
+                        end
+                    end
+                end
+                return true
+            end
+            if mt.Name == "Marines" and tt.Name == "Marines" then return false end
+        end
+        return true
+    end
 
+    local function getClosestEnemy()
+        local myHRP = lp.Character and lp.Character:FindFirstChild("HumanoidRootPart")
+        if not myHRP then return nil end
+        local closest, closestDist = nil, math.huge
+        for _, pl in ipairs(Players:GetPlayers()) do
+            if pl ~= lp and isEnemy(pl) and pl.Character then
+                local hrp = pl.Character:FindFirstChild("HumanoidRootPart")
+                local hum = pl.Character:FindFirstChildOfClass("Humanoid")
+                if hrp and hum and hum.Health > 0 then
+                    local dist = (hrp.Position - myHRP.Position).Magnitude
+                    if dist < closestDist then
+                        closestDist = dist
+                        closest = pl.Character.HumanoidRootPart
+                    end
+                end
+            end
+        end
+        return closest
+    end
+
+    -- Hook Mouse.Hit et Mouse.Target
+    local oldIndex
+    local mt = getrawmetatable(game)
+    local oldMT = mt.__index
+    setreadonly(mt, false)
+    mt.__index = newcclosure(function(t, k)
+        if t == Mouse and Enabled then
+            local target = nil
+            if SelectedPlayer and SelectedPlayer.Character and SelectedPlayer.Character:FindFirstChild("HumanoidRootPart") then
+                target = SelectedPlayer.Character.HumanoidRootPart
+            else
+                target = getClosestEnemy()
+            end
+            if target then
+                if k == "Hit" then return target.CFrame end
+                if k == "Target" then return target end
+            end
+        end
+        return oldMT(t, k)
+    end)
+    setreadonly(mt, true)
+
+    -- Hook InvokeServer pour rediriger les attaques qui utilisent un Vector3 (ex: Soru)
+    local oldNamecall = hookmetamethod(game, "__namecall", function(self, ...)
+        local method = getnamecallmethod()
+        local args = {...}
+        if (method == "InvokeServer" or method == "FireServer") and Enabled then
+            if self == commE and args[1] == "Soru" then
+                -- On redirige la position vers la cible
+                local target = nil
+                if SelectedPlayer and SelectedPlayer.Character then
+                    target = SelectedPlayer.Character:FindFirstChild("HumanoidRootPart")
+                else
+                    target = getClosestEnemy()
+                end
+                if target then
+                    -- Modifier les arguments : la position est souvent args[2] (Vector3)
+                    -- Ici on laisse passer normalement, mais on peut aussi rediriger
+                    return oldNamecall(self, ...)
+                end
+            end
+        end
+        return oldNamecall(self, ...)
+    end)
+
+    return {
+        setEnabled = function(v) Enabled = v end,
+        setSelectedPlayer = function(name)
+            if not name or name == "None" then SelectedPlayer = nil
+            else SelectedPlayer = Players:FindFirstChild(name) end
+        end,
+        isEnabled = function() return Enabled end
+    }
+end)()
+
+-- ================================================
+--  GLITCH MODULES (Sanguine & Diamond)
+-- ================================================
+local Glitch = (function()
+    local multiEnabled = false
+    local multiPower = 400
+    local multiDuration = 0.9
+    local multiCharging = false
+    local multiChargeStart = 0
+
+    local diamondEnabled = false
+    local diamondPower = 400
+    local diamondDuration = 0.9
+    local diamondRequiredCharge = 1.0
+    local diamondCharging = false
+    local diamondChargeStart = 0
+
+    local function MegaBoost()
+        local char = lp.Character
+        local hrp = char and char:FindFirstChild("HumanoidRootPart")
+        local hum = char and char:FindFirstChildOfClass("Humanoid")
+        if not hrp or not hum then return end
+        local targetPos = Mouse.Hit.p
+        local direction = (targetPos - hrp.Position).Unit
+        hum.PlatformStand = true
+        local att = Instance.new("Attachment", hrp)
+        local lv = Instance.new("LinearVelocity", hrp)
+        lv.MaxForce = 9999999
+        lv.VelocityConstraintMode = Enum.VelocityConstraintMode.Vector
+        lv.VectorVelocity = direction * multiPower
+        lv.Attachment0 = att
+        task.wait(multiDuration)
+        if lv then lv:Destroy() end
+        if att then att:Destroy() end
+        hum.PlatformStand = false
+    end
+
+    local function DiamondBoost()
+        local char = lp.Character
+        local hrp = char and char:FindFirstChild("HumanoidRootPart")
+        local hum = char and char:FindFirstChildOfClass("Humanoid")
+        if not hrp or not hum then return end
+        local direction = (Mouse.Hit.p - hrp.Position).Unit
+        hum.PlatformStand = true
+        local att = Instance.new("Attachment", hrp)
+        local lv = Instance.new("LinearVelocity", hrp)
+        lv.MaxForce = 9999999
+        lv.VelocityConstraintMode = Enum.VelocityConstraintMode.Vector
+        lv.VectorVelocity = direction * diamondPower
+        lv.Attachment0 = att
+        task.wait(diamondDuration)
+        if lv then lv:Destroy() end
+        if att then att:Destroy() end
+        hum.PlatformStand = false
+    end
+
+    RunService.Heartbeat:Connect(function()
+        if multiEnabled then
+            local char = lp.Character
+            local hum = char and char:FindFirstChildOfClass("Humanoid")
+            if hum then
+                local isGhoulCharging = false
+                for _, anim in pairs(hum:GetPlayingAnimationTracks()) do
+                    if anim.Animation.AnimationId:find("14418367908") or anim.Name == "GhoulZCharge" then
+                        isGhoulCharging = true break
+                    end
+                end
+                if isGhoulCharging then
+                    if not multiCharging then multiCharging = true multiChargeStart = tick() end
+                else
+                    if multiCharging then
+                        if (tick() - multiChargeStart) >= 2.0 then task.spawn(MegaBoost) end
+                        multiCharging = false
+                    end
+                end
+            end
+        end
+
+        if diamondEnabled then
+            local char = lp.Character
+            local hum = char and char:FindFirstChildOfClass("Humanoid")
+            if hum then
+                local isCharging = false
+                for _, anim in pairs(hum:GetPlayingAnimationTracks()) do
+                    if anim.Animation.AnimationId:find("14414815375") then
+                        isCharging = true break
+                    end
+                end
+                if isCharging then
+                    if not diamondCharging then diamondCharging = true diamondChargeStart = tick() end
+                else
+                    if diamondCharging then
+                        if (tick() - diamondChargeStart) >= diamondRequiredCharge then
+                            task.spawn(DiamondBoost)
+                        end
+                        diamondCharging = false
+                    end
+                end
+            end
+        end
+    end)
+
+    return {
+        setSanguine = function(v) multiEnabled = v end,
+        setSanguinePower = function(v) multiPower = v end,
+        setSanguineDuration = function(v) multiDuration = v end,
+        setDiamond = function(v) diamondEnabled = v end,
+        setDiamondPower = function(v) diamondPower = v end,
+        setDiamondDuration = function(v) diamondDuration = v end,
+        setDiamondCharge = function(v) diamondRequiredCharge = v end
+    }
+end)()
+
+-- ================================================
+--  ESP MODULE (Players + NPCs)
+-- ================================================
+local ESP = (function()
+    local ESPEnabled = false
+    local ESPNPCEnabled = false
+
+    -- Players toggles
+    local ESPBox = true
+    local ESPCornerBox = false
+    local ESPFilledBox = false
+    local ESPLines = true
+    local ESPName = true
+    local ESPDistance = true
+    local ESPHealthBar = true
+    local ESPHealthNum = false
+    local ESPWeapon = false
+    local ESPTeam = false
+    local ESPBounty = false
+    local ESPSkeleton = false
+    local ESPHeadDot = false
+    local ESPOffScreen = false
+    local ESPChams = false
+
+    -- NPC toggles
+    local ESPNPCBox = true
+    local ESPNPCName = true
+    local ESPNPCDist = true
+    local ESPNPCHp = true
+    local ESPNPCChams = false
+
+    local espObjects = {}
+    local espConnection = nil
+    local chamsObjects = {}
+
+    local function worldToViewport(pos)
+        if not cam then return nil, false end
+        local screenPos, onScreen = cam:WorldToViewportPoint(pos)
+        return Vector2.new(screenPos.X, screenPos.Y), onScreen, screenPos.Z
+    end
+
+    local function getCharBounds(char)
+        local hrp = char:FindFirstChild("HumanoidRootPart")
+        if not hrp then return nil end
+        local head = char:FindFirstChild("Head")
+        local topPos = head and head.Position + Vector3.new(0, head.Size.Y/2 + 0.2, 0) or hrp.Position + Vector3.new(0, 3, 0)
+        local botPos = hrp.Position - Vector3.new(0, 3, 0)
+
+        local topScreen, topOn, topZ = worldToViewport(topPos)
+        local botScreen, botOn = worldToViewport(botPos)
+
+        if not topOn and not botOn then return nil end
+
+        local h = math.abs(topScreen.Y - botScreen.Y)
+        local w = h * 0.6
+        local cx = topScreen.X
+
+        return { top = topScreen, bot = botScreen, cx = cx, w = w, h = h, depth = topZ, onScreen = topOn or botOn }
+    end
+
+    local function createDrawings(key)
+        local d = {}
+        d.boxTop = Drawing.new("Line")
+        d.boxBot = Drawing.new("Line")
+        d.boxLeft = Drawing.new("Line")
+        d.boxRight = Drawing.new("Line")
+        d.cTL1 = Drawing.new("Line") d.cTL2 = Drawing.new("Line")
+        d.cTR1 = Drawing.new("Line") d.cTR2 = Drawing.new("Line")
+        d.cBL1 = Drawing.new("Line") d.cBL2 = Drawing.new("Line")
+        d.cBR1 = Drawing.new("Line") d.cBR2 = Drawing.new("Line")
+        d.filled = Drawing.new("Square")
+        d.line = Drawing.new("Line")
+        d.name = Drawing.new("Text")
+        d.dist = Drawing.new("Text")
+        d.hpBg = Drawing.new("Line")
+        d.hpFill = Drawing.new("Line")
+        d.hpNum = Drawing.new("Text")
+        d.weapon = Drawing.new("Text")
+        d.team = Drawing.new("Text")
+        d.bounty = Drawing.new("Text")
+        d.headDot = Drawing.new("Circle")
+        d.sk = {}
+        for i = 1, 12 do d.sk[i] = Drawing.new("Line") end
+        d.arrow = Drawing.new("Triangle")
+        for _, obj in pairs(d) do if type(obj) ~= "table" then obj.Visible = false end end
+        for _, obj in ipairs(d.sk) do obj.Visible = false end
+        for _, b in ipairs({d.boxTop,d.boxBot,d.boxLeft,d.boxRight,d.cTL1,d.cTL2,d.cTR1,d.cTR2,d.cBL1,d.cBL2,d.cBR1,d.cBR2}) do b.Thickness = 1 end
+        d.line.Thickness = 1
+        d.hpBg.Thickness = 4 d.hpFill.Thickness = 4
+        for _, s in ipairs(d.sk) do s.Thickness = 1 s.Transparency = 0.3 end
+        for _, t in ipairs({d.name, d.dist, d.hpNum, d.weapon, d.team, d.bounty}) do t.Size = 12 t.Center = true t.Outline = true t.Font = 2 end
+        d.name.Size = 13
+        d.dist.Color = Color3.fromRGB(200,200,200)
+        d.hpNum.Color = Color3.fromRGB(255,255,255)
+        d.weapon.Color = Color3.fromRGB(255,220,100)
+        d.team.Color = Color3.fromRGB(100,200,255)
+        d.bounty.Color = Color3.fromRGB(255,180,50)
+        d.headDot.Radius = 4 d.headDot.Thickness = 1 d.headDot.Filled = true
+        d.filled.Transparency = 0.7
+        d.arrow.Thickness = 1 d.arrow.Filled = true
+        espObjects[key] = d
+        return d
+    end
+
+    local function hideDrawings(d)
+        if not d then return end
+        for _, obj in pairs(d) do obj.Visible = false end
+    end
+
+    local function removeDrawings(key)
+        local d = espObjects[key]
+        if d then
+            for _, obj in pairs(d) do pcall(function() obj:Remove() end) end
+            espObjects[key] = nil
+        end
+    end
+
+    local function applyChams(char, col)
+        local key = tostring(char)
+        if chamsObjects[key] then return end
+        chamsObjects[key] = {}
+        for _, part in ipairs(char:GetDescendants()) do
+            if part:IsA("BasePart") and part.Name ~= "HumanoidRootPart" then
+                local orig = part.Color
+                part.Color = col
+                table.insert(chamsObjects[key], {part=part, orig=orig})
+            end
+        end
+    end
+
+    local function removeChams(char)
+        if not char then return end
+        local key = tostring(char)
+        if not chamsObjects[key] then return end
+        for _, data in ipairs(chamsObjects[key]) do
+            pcall(function() data.part.Color = data.orig end)
+        end
+        chamsObjects[key] = nil
+    end
+
+    local skBones = {
+        {"Head","UpperTorso"},{"UpperTorso","LowerTorso"},
+        {"UpperTorso","RightUpperArm"},{"RightUpperArm","RightLowerArm"},{"RightLowerArm","RightHand"},
+        {"UpperTorso","LeftUpperArm"},{"LeftUpperArm","LeftLowerArm"},{"LeftLowerArm","LeftHand"},
+        {"LowerTorso","RightUpperLeg"},{"RightUpperLeg","RightLowerLeg"},
+        {"LowerTorso","LeftUpperLeg"},{"LeftUpperLeg","LeftLowerLeg"},
+    }
+
+    local function updateESP(target, key, isNPC)
+        local char = isNPC and target or (target.Character)
+        if not char then hideDrawings(espObjects[key]) return end
+        local hrp = char:FindFirstChild("HumanoidRootPart")
+        local hum = char:FindFirstChildOfClass("Humanoid")
+        if not hrp or not hum or hum.Health <= 0 then hideDrawings(espObjects[key]) return end
+
+        local bounds = getCharBounds(char)
+        local d = espObjects[key] or createDrawings(key)
+        local col = isNPC and Color3.fromRGB(255,165,0) or Color3.fromRGB(255,50,50)
+        if not isNPC then
+            local pl = Players:FindFirstChild(char.Name)
+            if pl and not isEnemy(pl) then col = Color3.fromRGB(50,255,50) end
+        end
+
+        local myChar = lp.Character
+        local myHRP = myChar and myChar:FindFirstChild("HumanoidRootPart")
+        local dist = myHRP and math.floor((hrp.Position - myHRP.Position).Magnitude) or 0
+
+        local screenPos2, onScreen2 = worldToViewport(hrp.Position)
+        if not onScreen2 and ESPOffScreen then
+            local screenCenter = Vector2.new(cam.ViewportSize.X/2, cam.ViewportSize.Y/2)
+            local dir = (screenPos2 - screenCenter).Unit
+            local angle = math.atan2(dir.Y, dir.X)
+            local arrowDist = 80
+            local arrowPos = screenCenter + dir * arrowDist
+            local sz = 10
+            local p1 = arrowPos + Vector2.new(math.cos(angle)*sz, math.sin(angle)*sz)
+            local p2 = arrowPos + Vector2.new(math.cos(angle+2.4)*sz*0.5, math.sin(angle+2.4)*sz*0.5)
+            local p3 = arrowPos + Vector2.new(math.cos(angle-2.4)*sz*0.5, math.sin(angle-2.4)*sz*0.5)
+            d.arrow.PointA = p1 d.arrow.PointB = p2 d.arrow.PointC = p3
+            d.arrow.Color = col d.arrow.Visible = true
+        else
+            d.arrow.Visible = false
+        end
+
+        if not bounds or not bounds.onScreen then
+            for k2, obj in pairs(d) do if k2 ~= "arrow" and k2 ~= "sk" then obj.Visible = false end end
+            for _, s in ipairs(d.sk) do s.Visible = false end
+            return
+        end
+
+        local cx = bounds.cx
+        local w2 = bounds.w / 2
+        local topY = bounds.top.Y
+        local botY = bounds.bot.Y
+        local left = cx - w2
+        local right = cx + w2
+        local cornerLen = bounds.w * 0.25
+
+        d.boxTop.From=Vector2.new(left,topY) d.boxTop.To=Vector2.new(right,topY)
+        d.boxBot.From=Vector2.new(left,botY) d.boxBot.To=Vector2.new(right,botY)
+        d.boxLeft.From=Vector2.new(left,topY) d.boxLeft.To=Vector2.new(left,botY)
+        d.boxRight.From=Vector2.new(right,topY) d.boxRight.To=Vector2.new(right,botY)
+        for _, b in ipairs({d.boxTop,d.boxBot,d.boxLeft,d.boxRight}) do b.Color=col b.Visible=(isNPC and ESPNPCBox or ESPBox) end
+
+        local cl = cornerLen
+        d.cTL1.From=Vector2.new(left,topY) d.cTL1.To=Vector2.new(left+cl,topY)
+        d.cTL2.From=Vector2.new(left,topY) d.cTL2.To=Vector2.new(left,topY+cl)
+        d.cTR1.From=Vector2.new(right,topY) d.cTR1.To=Vector2.new(right-cl,topY)
+        d.cTR2.From=Vector2.new(right,topY) d.cTR2.To=Vector2.new(right,topY+cl)
+        d.cBL1.From=Vector2.new(left,botY) d.cBL1.To=Vector2.new(left+cl,botY)
+        d.cBL2.From=Vector2.new(left,botY) d.cBL2.To=Vector2.new(left,botY-cl)
+        d.cBR1.From=Vector2.new(right,botY) d.cBR1.To=Vector2.new(right-cl,botY)
+        d.cBR2.From=Vector2.new(right,botY) d.cBR2.To=Vector2.new(right,botY-cl)
+        for _, b in ipairs({d.cTL1,d.cTL2,d.cTR1,d.cTR2,d.cBL1,d.cBL2,d.cBR1,d.cBR2}) do b.Color=col b.Visible=ESPCornerBox end
+
+        d.filled.Position = Vector2.new(left, topY)
+        d.filled.Size = Vector2.new(bounds.w, bounds.h)
+        d.filled.Color = col d.filled.Visible = ESPFilledBox
+
+        local midTop = Vector2.new(cam.ViewportSize.X/2, 0)
+        d.line.From=midTop d.line.To=Vector2.new(cx,topY) d.line.Color=col d.line.Visible=ESPLines
+
+        local nameStr = isNPC and char.Name or char.Name
+        d.name.Text=nameStr d.name.Position=Vector2.new(cx,topY-16) d.name.Color=col d.name.Visible=(isNPC and ESPNPCName or ESPName)
+
+        d.dist.Text=dist.."m" d.dist.Position=Vector2.new(cx,botY+2) d.dist.Visible=(isNPC and ESPNPCDist or ESPDistance)
+
+        local hpRatio = math.clamp(hum.Health/hum.MaxHealth,0,1)
+        local barX = left - 6
+        local hpColor = Color3.fromRGB(math.floor(255*(1-hpRatio)), math.floor(255*hpRatio), 0)
+        d.hpBg.From=Vector2.new(barX,topY) d.hpBg.To=Vector2.new(barX,botY)
+        d.hpBg.Color=Color3.fromRGB(40,40,40) d.hpBg.Visible=(isNPC and ESPNPCHp or ESPHealthBar)
+        local fillY = botY-(botY-topY)*hpRatio
+        d.hpFill.From=Vector2.new(barX,fillY) d.hpFill.To=Vector2.new(barX,botY)
+        d.hpFill.Color=hpColor d.hpFill.Visible=(isNPC and ESPNPCHp or ESPHealthBar)
+
+        d.hpNum.Text=math.floor(hum.Health).."/"..math.floor(hum.MaxHealth)
+        d.hpNum.Position=Vector2.new(barX-2,topY+bounds.h/2-6)
+        d.hpNum.Visible=ESPHealthNum
+
+        local weaponStr = ""
+        if ESPWeapon then
+            for _, child in ipairs(char:GetChildren()) do
+                if child:IsA("Tool") then weaponStr = child.Name break end
+            end
+        end
+        d.weapon.Text=weaponStr d.weapon.Position=Vector2.new(cx,topY-28) d.weapon.Visible=ESPWeapon
+
+        local teamStr = ""
+        if not isNPC then
+            local pl = Players:FindFirstChild(char.Name)
+            teamStr = pl and pl.Team and pl.Team.Name or ""
+        end
+        d.team.Text=teamStr d.team.Position=Vector2.new(cx,botY+13) d.team.Visible=ESPTeam
+
+        local bountyStr = ""
+        if ESPBounty and not isNPC then
+            local pl = Players:FindFirstChild(char.Name)
+            if pl then
+                local leaderstats = pl:FindFirstChild("leaderstats")
+                local bounty = leaderstats and (leaderstats:FindFirstChild("Bounty") or leaderstats:FindFirstChild("Beli"))
+                bountyStr = bounty and ("$"..tostring(bounty.Value)) or ""
+            end
+        end
+        d.bounty.Text=bountyStr d.bounty.Position=Vector2.new(cx,botY+24) d.bounty.Visible=ESPBounty
+
+        local head = char:FindFirstChild("Head")
+        if head and ESPHeadDot then
+            local headScreen, headOn = worldToViewport(head.Position)
+            if headOn then
+                d.headDot.Position=headScreen d.headDot.Color=col d.headDot.Visible=true
+            else d.headDot.Visible=false end
+        else d.headDot.Visible=false end
+
+        for i, bone in ipairs(skBones) do
+            local p1 = char:FindFirstChild(bone[1])
+            local p2 = char:FindFirstChild(bone[2])
+            local s = d.sk[i]
+            if p1 and p2 and ESPSkeleton then
+                local sp1, on1 = worldToViewport(p1.Position)
+                local sp2, on2 = worldToViewport(p2.Position)
+                if on1 or on2 then
+                    s.From=sp1 s.To=sp2 s.Color=col s.Visible=true
+                else s.Visible=false end
+            else s.Visible=false end
+        end
+
+        if (isNPC and ESPNPCChams) or (not isNPC and ESPChams) then
+            applyChams(char, col)
+        else
+            removeChams(char)
+        end
+    end
+
+    local function startESP()
+        if espConnection then return end
+        espConnection = RunService.RenderStepped:Connect(function()
+            local tracked = {}
+            if ESPEnabled then
+                for _, pl in ipairs(Players:GetPlayers()) do
+                    if pl ~= lp then
+                        local key = "player_" .. pl.UserId
+                        tracked[key] = true
+                        updateESP(pl, key, false)
+                    end
+                end
+            end
+            if ESPNPCEnabled then
+                local enemiesFolder = workspace:FindFirstChild("Enemies")
+                if enemiesFolder then
+                    for _, npc in ipairs(enemiesFolder:GetChildren()) do
+                        if npc:IsA("Model") then
+                            local key = "npc_" .. npc.Name .. tostring(npc)
+                            tracked[key] = true
+                            updateESP(npc, key, true)
+                        end
+                    end
+                end
+            end
+            for key, _ in pairs(espObjects) do
+                if not tracked[key] then removeDrawings(key) end
+            end
+        end)
+    end
+
+    local function stopESP()
+        if espConnection then espConnection:Disconnect() espConnection = nil end
+        for key, _ in pairs(espObjects) do removeDrawings(key) end
+    end
+
+    return {
+        setEnabled = function(v)
+            ESPEnabled = v
+            if ESPEnabled or ESPNPCEnabled then startESP() else stopESP() end
+        end,
+        setNPCEnabled = function(v)
+            ESPNPCEnabled = v
+            if ESPEnabled or ESPNPCEnabled then startESP() else stopESP() end
+        end,
+        setBox = function(v) ESPBox = v end,
+        setCornerBox = function(v) ESPCornerBox = v end,
+        setFilledBox = function(v) ESPFilledBox = v end,
+        setLines = function(v) ESPLines = v end,
+        setName = function(v) ESPName = v end,
+        setDistance = function(v) ESPDistance = v end,
+        setHealthBar = function(v) ESPHealthBar = v end,
+        setHealthNum = function(v) ESPHealthNum = v end,
+        setWeapon = function(v) ESPWeapon = v end,
+        setTeam = function(v) ESPTeam = v end,
+        setBounty = function(v) ESPBounty = v end,
+        setSkeleton = function(v) ESPSkeleton = v end,
+        setHeadDot = function(v) ESPHeadDot = v end,
+        setOffScreen = function(v) ESPOffScreen = v end,
+        setChams = function(v) ESPChams = v end,
+        setNPCBox = function(v) ESPNPCBox = v end,
+        setNPCName = function(v) ESPNPCName = v end,
+        setNPCDist = function(v) ESPNPCDist = v end,
+        setNPCHp = function(v) ESPNPCHp = v end,
+        setNPCChams = function(v) ESPNPCChams = v end
+    }
+end)()
+
+-- ================================================
+--  PLAYER FEATURES (Fake Items, Movement, Misc)
+-- ================================================
+local PlayerFeatures = (function()
+    local fakeKorblox = false
+    local fakeKorbloxVersion = "V1"
+    local fakeHeadless = false
+    local fakeHeadlessVersion = "V1"
+    local stretched = false
+    local stretchAmount = 0.65
+    local jumpBoost = false
+    local jumpPower = 100
+    local speedHack = false
+    local speedValue = 50
+    local flyEnabled = false
+    local flySpeed = 50
+    local flySpin = false
+    local flySpinSpeed = 50
+    local infiniteJump = false
+    local autoKen = false
+
+    local stretchConn = nil
+    local speedConn = nil
+    local flyConn = nil
+    local flySpinConn = nil
+    local flyMiniGui = nil
+    local flySpinMiniGui = nil
+    local flyActive = false
+    local flySpinActive = false
+    local _flyUp = false
+    local _flyDown = false
+
+    -- Fake Items
+    local korbloxMeshes = {}
+    local hiddenHairAcc = {}
+
+    local function applyFakeKorblox()
+        local char = lp.Character if not char then return end
+        local rl = char:FindFirstChild("RightUpperLeg")
+        local rl2 = char:FindFirstChild("RightLowerLeg")
+        local rf = char:FindFirstChild("RightFoot")
+        if rl then
+            rl.Transparency = 1
+            for _, c in pairs(rl:GetChildren()) do if c:IsA("SpecialMesh") then c:Destroy() end end
+            local mesh = Instance.new("SpecialMesh")
+            mesh.MeshId = "rbxassetid://139607718"
+            mesh.TextureId = "rbxassetid://139607673"
+            mesh.Scale = Vector3.new(1,1,1) mesh.Parent = rl
+            table.insert(korbloxMeshes, mesh)
+        end
+        if rl2 then rl2.Transparency = 1 end
+        if rf then rf.Transparency = 1 end
+        if fakeKorbloxVersion == "V2" then
+            for _, n in pairs({"LeftUpperLeg","LeftLowerLeg","LeftFoot"}) do
+                local p = char:FindFirstChild(n) if p then p.Transparency = 1 end
+            end
+        end
+    end
+
+    local function removeFakeKorblox()
+        for _, m in pairs(korbloxMeshes) do pcall(function() m:Destroy() end) end
+        korbloxMeshes = {}
+        local char = lp.Character if not char then return end
+        for _, n in pairs({"RightUpperLeg","RightLowerLeg","RightFoot","LeftUpperLeg","LeftLowerLeg","LeftFoot"}) do
+            local p = char:FindFirstChild(n) if p then p.Transparency = 0 end
+        end
+    end
+
+    local function applyFakeHeadless()
+        local char = lp.Character if not char then return end
+        local head = char:FindFirstChild("Head")
+        if head then
+            head.Transparency = 1
+            local face = head:FindFirstChild("face")
+            if face then face.Transparency = 1 end
+        end
+        if fakeHeadlessVersion == "V2" then
+            hiddenHairAcc = {}
+            for _, obj in pairs(char:GetChildren()) do
+                if obj:IsA("Accessory") then
+                    local handle = obj:FindFirstChild("Handle")
+                    if handle then handle.Transparency = 1 table.insert(hiddenHairAcc, handle) end
+                end
+            end
+        end
+    end
+
+    local function removeFakeHeadless()
+        local char = lp.Character if not char then return end
+        local head = char:FindFirstChild("Head")
+        if head then
+            head.Transparency = 0
+            local face = head:FindFirstChild("face")
+            if face then face.Transparency = 0 end
+        end
+        for _, h in pairs(hiddenHairAcc) do pcall(function() h.Transparency = 0 end) end
+        hiddenHairAcc = {}
+    end
+
+    local function applyStretched()
+        if stretchConn then stretchConn:Disconnect() end
+        stretchConn = RunService.RenderStepped:Connect(function()
+            if cam and stretched then
+                cam.CFrame = cam.CFrame * CFrame.new(0,0,0,1,0,0,0,stretchAmount,0,0,0,1)
+            end
+        end)
+    end
+
+    local function removeStretched()
+        if stretchConn then stretchConn:Disconnect() stretchConn = nil end
+    end
+
+    local function applyJump()
+        local char = lp.Character if not char then return end
+        local hum = char:FindFirstChildOfClass("Humanoid")
+        if hum then hum.JumpPower = jumpPower end
+    end
+
+    local function resetJump()
+        local char = lp.Character if not char then return end
+        local hum = char:FindFirstChildOfClass("Humanoid")
+        if hum then hum.JumpPower = 50 end
+    end
+
+    local function applySpeed()
+        if speedConn then speedConn:Disconnect() speedConn = nil end
+        speedConn = RunService.Heartbeat:Connect(function()
+            if not speedHack then return end
+            local c = lp.Character
+            local h = c and c:FindFirstChildOfClass("Humanoid")
+            if h then h.WalkSpeed = speedValue end
+        end)
+    end
+
+    local function resetSpeed()
+        if speedConn then speedConn:Disconnect() speedConn = nil end
+        local char = lp.Character if not char then return end
+        local hum = char:FindFirstChildOfClass("Humanoid")
+        if hum then hum.WalkSpeed = 16 end
+    end
+
+    local function createFlyMiniToggle()
+        local playerGui = lp:WaitForChild("PlayerGui")
+        if playerGui:FindFirstChild("FlyMiniGui") then playerGui.FlyMiniGui:Destroy() end
+        local sg = Instance.new("ScreenGui")
+        sg.Name = "FlyMiniGui" sg.ResetOnSpawn = false sg.Parent = playerGui
+
+        local panel = Instance.new("Frame", sg)
+        panel.Size = UDim2.new(0, 155, 0, 130)
+        panel.Position = UDim2.new(0, 10, 0.5, -65)
+        panel.BackgroundColor3 = Color3.fromRGB(15, 15, 15)
+        panel.BorderSizePixel = 0
+        Instance.new("UICorner", panel).CornerRadius = UDim.new(0, 14)
+        local panelStroke = Instance.new("UIStroke", panel)
+        panelStroke.Color = Color3.fromRGB(60,60,60) panelStroke.Thickness = 1
+
+        local btn = Instance.new("TextButton", panel)
+        btn.Size = UDim2.new(1, -10, 0, 40)
+        btn.Position = UDim2.new(0, 5, 0, 5)
+        btn.Text = "✈  FLY: OFF"
+        btn.TextScaled = true
+        btn.BackgroundColor3 = Color3.fromRGB(35, 35, 35)
+        btn.TextColor3 = Color3.fromRGB(255, 255, 255)
+        btn.BorderSizePixel = 0
+        btn.Font = Enum.Font.GothamBold
+        Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 10)
+        local grad = Instance.new("UIGradient", btn) grad.Rotation = 45
+
+        local speedLbl = Instance.new("TextLabel", panel)
+        speedLbl.Size = UDim2.new(1, -10, 0, 20)
+        speedLbl.Position = UDim2.new(0, 5, 0, 50)
+        speedLbl.BackgroundTransparency = 1
+        speedLbl.Text = "Speed: " .. flySpeed
+        speedLbl.TextScaled = true
+        speedLbl.TextColor3 = Color3.fromRGB(160, 160, 160)
+        speedLbl.Font = Enum.Font.Gotham
+
+        local sep = Instance.new("Frame", panel)
+        sep.Size = UDim2.new(1, -20, 0, 1)
+        sep.Position = UDim2.new(0, 10, 0, 75)
+        sep.BackgroundColor3 = Color3.fromRGB(55, 55, 55)
+        sep.BorderSizePixel = 0
+
+        local upBtn = Instance.new("TextButton", panel)
+        upBtn.Size = UDim2.new(0, 67, 0, 42)
+        upBtn.Position = UDim2.new(0, 5, 0, 82)
+        upBtn.Text = "⬆  UP"
+        upBtn.TextScaled = true
+        upBtn.BackgroundColor3 = Color3.fromRGB(30, 80, 200)
+        upBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+        upBtn.BorderSizePixel = 0
+        upBtn.Font = Enum.Font.GothamBold
+        Instance.new("UICorner", upBtn).CornerRadius = UDim.new(0, 10)
+
+        local downBtn = Instance.new("TextButton", panel)
+        downBtn.Size = UDim2.new(0, 67, 0, 42)
+        downBtn.Position = UDim2.new(0, 80, 0, 82)
+        downBtn.Text = "⬇  DN"
+        downBtn.TextScaled = true
+        downBtn.BackgroundColor3 = Color3.fromRGB(180, 50, 35)
+        downBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+        downBtn.BorderSizePixel = 0
+        downBtn.Font = Enum.Font.GothamBold
+        Instance.new("UICorner", downBtn).CornerRadius = UDim.new(0, 10)
+
+        upBtn.InputBegan:Connect(function(i)
+            if i.UserInputType == Enum.UserInputType.Touch or i.UserInputType == Enum.UserInputType.MouseButton1 then _flyUp = true end
+        end)
+        upBtn.InputEnded:Connect(function(i)
+            if i.UserInputType == Enum.UserInputType.Touch or i.UserInputType == Enum.UserInputType.MouseButton1 then _flyUp = false end
+        end)
+        downBtn.InputBegan:Connect(function(i)
+            if i.UserInputType == Enum.UserInputType.Touch or i.UserInputType == Enum.UserInputType.MouseButton1 then _flyDown = true end
+        end)
+        downBtn.InputEnded:Connect(function(i)
+            if i.UserInputType == Enum.UserInputType.Touch or i.UserInputType == Enum.UserInputType.MouseButton1 then _flyDown = false end
+        end)
+
+        local function updateBtn(state)
+            btn.Text = "✈  FLY: " .. (state and "ON" or "OFF")
+            speedLbl.Text = "Speed: " .. flySpeed
+            grad.Color = ColorSequence.new{
+                ColorSequenceKeypoint.new(0, state and Color3.fromRGB(50,200,50) or Color3.fromRGB(70,70,70)),
+                ColorSequenceKeypoint.new(1, state and Color3.fromRGB(50,255,50) or Color3.fromRGB(40,40,40)),
+            }
+        end
+
+        btn.MouseButton1Click:Connect(function()
+            flyActive = not flyActive
+            updateBtn(flyActive)
+            if flyActive then
+                local char = lp.Character if not char then return end
+                local hrp = char:FindFirstChild("HumanoidRootPart") if not hrp then return end
+                local hum = char:FindFirstChildOfClass("Humanoid") if not hum then return end
+                hum.PlatformStand = true
+                flyAtt = Instance.new("Attachment", hrp)
+                flyLV = Instance.new("LinearVelocity", hrp)
+                flyLV.MaxForce = math.huge
+                flyLV.VelocityConstraintMode = Enum.VelocityConstraintMode.Vector
+                flyLV.VectorVelocity = Vector3.new(0, 0, 0)
+                flyLV.Attachment0 = flyAtt
+            else
+                _flyUp = false _flyDown = false
+                if flyLV then flyLV:Destroy() flyLV = nil end
+                if flyAtt then flyAtt:Destroy() flyAtt = nil end
+                local char = lp.Character if not char then return end
+                local hum = char:FindFirstChildOfClass("Humanoid") if hum then hum.PlatformStand = false end
+            end
+        end)
+
+        local dragging, dragStart, startPos = false, nil, nil
+        panel.InputBegan:Connect(function(i)
+            if i.UserInputType == Enum.UserInputType.Touch or i.UserInputType == Enum.UserInputType.MouseButton1 then
+                dragging=true dragStart=i.Position startPos=panel.Position
+                i.Changed:Connect(function() if i.UserInputState==Enum.UserInputState.End then dragging=false end end)
+            end
+        end)
+        panel.InputChanged:Connect(function(i)
+            if dragging and (i.UserInputType==Enum.UserInputType.Touch or i.UserInputType==Enum.UserInputType.MouseMovement) then
+                local d=i.Position-dragStart
+                local vp=cam.ViewportSize
+                panel.Position=UDim2.new(0,math.clamp(startPos.X.Offset+d.X,0,vp.X-panel.AbsoluteSize.X),0,math.clamp(startPos.Y.Offset+d.Y,0,vp.Y-panel.AbsoluteSize.Y))
+            end
+        end)
+
+        updateBtn(false)
+        flyMiniGui = sg
+    end
+
+    local function startFly()
+        if not flyMiniGui then createFlyMiniToggle() end
+        local att, lv = nil, nil
+        if flyConn then flyConn:Disconnect() end
+        flyConn = RunService.RenderStepped:Connect(function()
+            if not flyEnabled or not flyActive then return end
+            local char = lp.Character if not char then return end
+            local hrp = char:FindFirstChild("HumanoidRootPart") if not hrp then return end
+            local hum = char:FindFirstChildOfClass("Humanoid") if not hum then return end
+            if not flyLV or not flyAtt then return end
+            local moveDir = Vector3.new(0,0,0)
+            local cf = cam.CFrame
+
+            local md = hum.MoveDirection
+            if md.Magnitude > 0.1 then moveDir = moveDir + Vector3.new(md.X, 0, md.Z) end
+
+            if UserInputService:IsKeyDown(Enum.KeyCode.W) or UserInputService:IsKeyDown(Enum.KeyCode.Up) then moveDir = moveDir + cf.LookVector end
+            if UserInputService:IsKeyDown(Enum.KeyCode.S) or UserInputService:IsKeyDown(Enum.KeyCode.Down) then moveDir = moveDir - cf.LookVector end
+            if UserInputService:IsKeyDown(Enum.KeyCode.A) or UserInputService:IsKeyDown(Enum.KeyCode.Left) then moveDir = moveDir - cf.RightVector end
+            if UserInputService:IsKeyDown(Enum.KeyCode.D) or UserInputService:IsKeyDown(Enum.KeyCode.Right) then moveDir = moveDir + cf.RightVector end
+
+            if UserInputService:IsKeyDown(Enum.KeyCode.Space) or _flyUp then moveDir = moveDir + Vector3.new(0,1,0) end
+            if UserInputService:IsKeyDown(Enum.KeyCode.LeftControl) or _flyDown then moveDir = moveDir - Vector3.new(0,1,0) end
+
+            flyLV.VectorVelocity = moveDir.Magnitude > 0 and moveDir.Unit * flySpeed or Vector3.new(0,0,0)
+        end)
+    end
+
+    local function stopFly()
+        if flyConn then flyConn:Disconnect() flyConn = nil end
+        if flyLV then flyLV:Destroy() flyLV = nil end
+        if flyAtt then flyAtt:Destroy() flyAtt = nil end
+        if flyMiniGui then flyMiniGui:Destroy() flyMiniGui = nil end
+        flyActive = false _flyUp = false _flyDown = false
+        local char = lp.Character if not char then return end
+        local hum = char:FindFirstChildOfClass("Humanoid") if hum then hum.PlatformStand = false end
+    end
+
+    local function createFlySpinMiniToggle()
+        local playerGui = lp:WaitForChild("PlayerGui")
+        if playerGui:FindFirstChild("FlySpinMiniGui") then playerGui.FlySpinMiniGui:Destroy() end
+        local sg = Instance.new("ScreenGui")
+        sg.Name = "FlySpinMiniGui" sg.ResetOnSpawn = false sg.Parent = playerGui
+        local btn = Instance.new("TextButton", sg)
+        btn.Size = UDim2.new(0,90,0,40)
+        btn.Position = UDim2.new(0,10,0.5,30)
+        btn.Text = "SPIN: OFF" btn.TextScaled = true
+        btn.BackgroundColor3 = Color3.fromRGB(30,30,30)
+        btn.TextColor3 = Color3.fromRGB(255,255,255)
+        btn.BorderSizePixel = 0
+        Instance.new("UICorner",btn).CornerRadius = UDim.new(0,8)
+        local grad = Instance.new("UIGradient",btn) grad.Rotation = 45
+        local function updateBtn(state)
+            btn.Text = "SPIN: "..(state and "ON" or "OFF")
+            grad.Color = ColorSequence.new{
+                ColorSequenceKeypoint.new(0, state and Color3.fromRGB(165,100,255) or Color3.fromRGB(80,80,80)),
+                ColorSequenceKeypoint.new(1, state and Color3.fromRGB(200,50,255) or Color3.fromRGB(50,50,50)),
+            }
+        end
+        btn.MouseButton1Click:Connect(function()
+            flySpinActive = not flySpinActive
+            updateBtn(flySpinActive)
+        end)
+        local dragging,dragStart,startPos = false,nil,nil
+        btn.InputBegan:Connect(function(i)
+            if i.UserInputType==Enum.UserInputType.Touch or i.UserInputType==Enum.UserInputType.MouseButton1 then
+                dragging=true dragStart=i.Position startPos=btn.Position
+                i.Changed:Connect(function() if i.UserInputState==Enum.UserInputState.End then dragging=false end end)
+            end
+        end)
+        btn.InputChanged:Connect(function(i)
+            if dragging and (i.UserInputType==Enum.UserInputType.Touch or i.UserInputType==Enum.UserInputType.MouseMovement) then
+                local d=i.Position-dragStart
+                local vp=cam.ViewportSize
+                btn.Position=UDim2.new(0,math.clamp(startPos.X.Offset+d.X,0,vp.X-btn.AbsoluteSize.X),0,math.clamp(startPos.Y.Offset+d.Y,0,vp.Y-btn.AbsoluteSize.Y))
+            end
+        end)
+        updateBtn(false)
+        flySpinMiniGui = sg
+    end
+
+    local function startFlySpin()
+        if not flySpinMiniGui then createFlySpinMiniToggle() end
+        local angle = 0
+        if flySpinConn then flySpinConn:Disconnect() end
+        flySpinConn = RunService.Heartbeat:Connect(function()
+            if not flySpin or not flySpinActive then return end
+            local char = lp.Character if not char then return end
+            local hrp = char:FindFirstChild("HumanoidRootPart") if not hrp then return end
+            angle = angle + math.rad(flySpinSpeed / 10)
+            hrp.CFrame = CFrame.new(hrp.Position) * CFrame.Angles(0, angle, 0)
+        end)
+    end
+
+    local function stopFlySpin()
+        if flySpinConn then flySpinConn:Disconnect() flySpinConn = nil end
+        if flySpinMiniGui then flySpinMiniGui:Destroy() flySpinMiniGui = nil end
+        flySpinActive = false
+    end
+
+    local function startAutoKen()
+        task.spawn(function()
+            while autoKen do
+                task.wait(0.1)
+                if lp.Character and game:GetService("CollectionService"):HasTag(lp.Character, "Ken") then
+                    local pg = lp:FindFirstChild("PlayerGui")
+                    if pg then
+                        local btn = pg:FindFirstChild("MobileContextButtons")
+                            and pg.MobileContextButtons.ContextButtonFrame:FindFirstChild("BoundActionKen")
+                        if btn and btn:GetAttribute("Selected") ~= true then btn:SetAttribute("Selected", true) end
+                    end
+                    local om = getrenv()._G.OM
+                    if om and not om.active then om.radius=0 om:setActive(true) if commE then commE:FireServer("Ken",true) end end
+                end
+            end
+        end)
+    end
+
+    return {
+        setKorblox = function(v) fakeKorblox = v if v then applyFakeKorblox() else removeFakeKorblox() end end,
+        setKorbloxVersion = function(v) fakeKorbloxVersion = v if fakeKorblox then applyFakeKorblox() end end,
+        setHeadless = function(v) fakeHeadless = v if v then applyFakeHeadless() else removeFakeHeadless() end end,
+        setHeadlessVersion = function(v) fakeHeadlessVersion = v if fakeHeadless then applyFakeHeadless() end end,
+        setStretched = function(v) stretched = v if v then applyStretched() else removeStretched() end end,
+        setStretchAmount = function(v) stretchAmount = v/100 if stretched then applyStretched() end end,
+        setJumpBoost = function(v) jumpBoost = v if v then applyJump() else resetJump() end end,
+        setJumpPower = function(v) jumpPower = v if jumpBoost then applyJump() end end,
+        setSpeedHack = function(v) speedHack = v if v then applySpeed() else resetSpeed() end end,
+        setSpeedValue = function(v) speedValue = v if speedHack then applySpeed() end end,
+        setFly = function(v) flyEnabled = v if v then startFly() else stopFly() end end,
+        setFlySpeed = function(v) flySpeed = v end,
+        setFlySpin = function(v) flySpin = v if v then startFlySpin() else stopFlySpin() end end,
+        setFlySpinSpeed = function(v) flySpinSpeed = v end,
+        setInfiniteJump = function(v) infiniteJump = v end,
+        setAutoKen = function(v) autoKen = v if v then startAutoKen() end end
+    }
+end)()
+
+-- ================================================
+--  WINDOW & TABS (Organized as requested)
+-- ================================================
 local Window = Library:Window({
-    Name    = "Nameless Client",
-    SubName = "Silent Aim (Z Skills only - M1 désactivés)",
-    Logo    = "81786914450484"
+    Name = "Nameless Client",
+    SubName = "All-in-One",
+    Logo = "81786914450484"
 })
 
 local KeybindList = Library:KeybindList("Keybinds")
-Library:Watermark({ "Nameless Client", "|", "Blox Fruits" })
+Library:Watermark({ "Nameless Client", "|", "By HimselfZen" })
 if Library.WatermarkFrame then Library.WatermarkFrame.Instance.Visible = true end
 
--- ══════════════════════════════════════════════
---  TAB 1 — SILENT AIM
--- ══════════════════════════════════════════════
-local PageSA = Window:Page({ Name = "Silent Aim", Icon = "131319188753430" })
+-- ========== LEGIT TAB (Silent Aim + Soru) ==========
+local LegitTab = Window:Page({ Name = "Legit", Icon = "crosshair" })
 
--- Colonne gauche
-local SecMain = PageSA:Section({ Name = "Main", Side = 1, Icon = "131319188753430" })
-
-SecMain:Toggle({ Name="Silent Aim Players",    Flag="SAPlayers",   Default=false, Callback=function(v) SA:SetPlayerSilentAim(v) end })
-SecMain:Toggle({ Name="Silent Aim NPCs",       Flag="SANpcs",      Default=false, Callback=function(v) SA:SetNPCSilentAim(v) end })
-SecMain:Toggle({ Name="Z Skills (Godhuman, Shark Anchor, Cursed Katana)", Flag="ZSkills", Default=false, Callback=function(v) SA:SetZSkills(v) end })
-SecMain:Toggle({ Name="Prediction",            Flag="SAPred",      Default=false, Callback=function(v) SA:SetPrediction(v) end })
-SecMain:Slider({ Name="Prediction Amount", Flag="SAPredAmt", Min=0.05, Max=0.5, Default=0.1, Decimals=0.01, Suffix="s",
+-- Section Silent Aim
+local LegitSA = LegitTab:Section({ Name = "Silent Aim", Side = 1, Icon = "131319188753430" })
+LegitSA:Toggle({ Name="Silent Aim Players",    Flag="SAPlayers",   Default=false, Callback=function(v) SA:SetPlayerSilentAim(v) end })
+LegitSA:Toggle({ Name="Silent Aim NPCs",       Flag="SANpcs",      Default=false, Callback=function(v) SA:SetNPCSilentAim(v) end })
+LegitSA:Toggle({ Name="Skills Redirect (Z/X/C/V/F)", Flag="ZSkills", Default=false, Callback=function(v) SA:SetZSkills(v) end })
+LegitSA:Toggle({ Name="Prediction",            Flag="SAPred",      Default=false, Callback=function(v) SA:SetPrediction(v) end })
+LegitSA:Slider({ Name="Prediction Amount", Flag="SAPredAmt", Min=0.05, Max=0.5, Default=0.1, Decimals=0.01, Suffix="s",
     Callback=function(v) SA:SetPredictionAmount(v) end })
-SecMain:Slider({ Name="Distance Limit",    Flag="SADist",    Min=100, Max=1000, Default=1000, Decimals=50, Suffix="m",
+LegitSA:Slider({ Name="Distance Limit",    Flag="SADist",    Min=100, Max=1000, Default=1000, Decimals=50, Suffix="m",
     Callback=function(v) SA:SetDistanceLimit(v) end })
-SecMain:Toggle({ Name="Target Highlight",      Flag="SAHighlight", Default=false, Callback=function(v) SA:SetHighlight(v) end })
-SecMain:Toggle({ Name="Target Info (Name/HP)", Flag="SAInfo",      Default=false, Callback=function(v) SA:SetInfo(v) end })
+LegitSA:Toggle({ Name="Target Highlight",      Flag="SAHighlight", Default=false, Callback=function(v) SA:SetHighlight(v) end })
+LegitSA:Toggle({ Name="Target Info (Name/HP)", Flag="SAInfo",      Default=false, Callback=function(v) SA:SetInfo(v) end })
 
 local PlayerList = { "None" }
 for _, pl in ipairs(Players:GetPlayers()) do if pl ~= lp then table.insert(PlayerList, pl.Name) end end
-local PlayerDrop = SecMain:Dropdown({
+local PlayerDrop = LegitSA:Dropdown({
     Name="Lock On Player", Flag="SALock", Items=PlayerList, Default="None",
     Callback=function(v) SA:SetSelectedPlayer(v=="None" and nil or v) end
 })
@@ -605,71 +1535,131 @@ end
 Players.PlayerAdded:Connect(RefreshPlayers)
 Players.PlayerRemoving:Connect(RefreshPlayers)
 
-SecMain:Toggle({ Name="Mini Toggle Players", Flag="SAMiniP", Default=false, Callback=function(v) SA:SetMiniTogglePlayerSilentAim(v) end })
-SecMain:Toggle({ Name="Mini Toggle NPCs",    Flag="SAMiniN", Default=false, Callback=function(v) SA:SetMiniToggleNpcSilentAim(v) end })
+LegitSA:Toggle({ Name="Mini Toggle Players", Flag="SAMiniP", Default=false, Callback=function(v) SA:SetMiniTogglePlayerSilentAim(v) end })
+LegitSA:Toggle({ Name="Mini Toggle NPCs",    Flag="SAMiniN", Default=false, Callback=function(v) SA:SetMiniToggleNpcSilentAim(v) end })
 
--- Colonne droite : Auto Ken
-local SecCombat = PageSA:Section({ Name = "Combat", Side = 2, Icon = "131319188753430" })
-SecCombat:Toggle({ Name="Auto Ken", Flag="AutoKen", Default=false, Callback=function(v) SA:SetAutoKen(v) end })
+-- Section Soru Auto Aim (from the other script)
+local LegitSoru = LegitTab:Section({ Name = "Soru Auto Aim", Side = 2, Icon = "81786914450484" })
+LegitSoru:Toggle({ Name="Soru Auto Aim", Flag="SoruAim", Default=false, Callback=function(v) SoruAutoAim.setEnabled(v) end })
 
--- ══════════════════════════════════════════════
---  TAB 2 — VISUAL (exemple)
--- ══════════════════════════════════════════════
-local PageVisual = Window:Page({ Name = "Visual", Icon = "122669828593160" })
-
-local SecWorld = PageVisual:Section({ Name = "World", Side = 1, Icon = "73789337996373" })
-SecWorld:Toggle({
-    Name="Remove Lava", Flag="NoLava", Default=false,
-    Callback=function(v)
-        for _, o in workspace:GetDescendants() do
-            if o.Name:lower():find("lava") then pcall(function() o.CanTouch = not v end) end
-        end
-    end
+local SoruPlayerList = { "None" }
+for _, pl in ipairs(Players:GetPlayers()) do if pl ~= lp then table.insert(SoruPlayerList, pl.Name) end end
+LegitSoru:Dropdown({
+    Name="Select Target", Flag="SoruTarget", Items=SoruPlayerList, Default="None",
+    Callback=function(v) SoruAutoAim.setSelectedPlayer(v=="None" and nil or v) end
 })
 
--- ══════════════════════════════════════════════
---  TAB 3 — PLAYER
--- ══════════════════════════════════════════════
-local PagePlayer = Window:Page({ Name = "Player", Icon = "81598136527047" })
+-- Section Combat (Auto Ken)
+local LegitCombat = LegitTab:Section({ Name = "Combat", Side = 1, Icon = "131319188753430" })
+LegitCombat:Toggle({ Name="Auto Ken", Flag="AutoKen", Default=false, Callback=function(v) PlayerFeatures.setAutoKen(v) end })
 
-local SecChar = PagePlayer:Section({ Name = "Character", Side = 1, Icon = "81598136527047" })
+-- ========== PLAYER TAB ==========
+local PlayerTab = Window:Page({ Name = "Player", Icon = "user" })
 
-SecChar:Toggle({
-    Name="Infinite Jump", Flag="InfJump", Default=false,
-    Callback=function(v)
-        if v then
-            game:GetService("UserInputService").JumpRequest:Connect(function()
-                if not Library.Flags["InfJump"] then return end
+local FakeItems = PlayerTab:Section({ Name = "Fake Items", Side = 1, Icon = "81598136527047" })
+FakeItems:Dropdown({ Name="Korblox Version", Flag="KorbloxVer", Items={"V1","V2"}, Default=1, Callback=function(v) PlayerFeatures.setKorbloxVersion(v) end })
+FakeItems:Toggle({ Name="Fake Korblox", Flag="FakeKorblox", Default=false, Callback=function(v) PlayerFeatures.setKorblox(v) end })
+FakeItems:Divider()
+FakeItems:Dropdown({ Name="Headless Version", Flag="HeadlessVer", Items={"V1","V2"}, Default=1, Callback=function(v) PlayerFeatures.setHeadlessVersion(v) end })
+FakeItems:Toggle({ Name="Fake Headless", Flag="FakeHeadless", Default=false, Callback=function(v) PlayerFeatures.setHeadless(v) end })
+FakeItems:Divider()
+FakeItems:Toggle({ Name="Stretched Screen", Flag="Stretched", Default=false, Callback=function(v) PlayerFeatures.setStretched(v) end })
+FakeItems:Slider({ Name="Stretch Amount", Flag="StretchAmt", Min=50, Max=100, Default=65, Rounding=0, Suffix="%", Callback=function(v) PlayerFeatures.setStretchAmount(v) end })
+
+local Movement = PlayerTab:Section({ Name = "Movement", Side = 2, Icon = "81598136527047" })
+Movement:Toggle({ Name="Jump Boost", Flag="JumpBoost", Default=false, Callback=function(v) PlayerFeatures.setJumpBoost(v) end })
+Movement:Slider({ Name="Jump Power", Flag="JumpPower", Min=50, Max=500, Default=100, Rounding=0, Callback=function(v) PlayerFeatures.setJumpPower(v) end })
+Movement:Divider()
+Movement:Toggle({ Name="Speed Hack", Flag="SpeedHack", Default=false, Callback=function(v) PlayerFeatures.setSpeedHack(v) end })
+Movement:Slider({ Name="Walk Speed", Flag="SpeedValue", Min=16, Max=50000, Default=50, Rounding=0, Callback=function(v) PlayerFeatures.setSpeedValue(v) end })
+Movement:Divider()
+Movement:Toggle({ Name="Fly", Flag="Fly", Default=false, Callback=function(v) PlayerFeatures.setFly(v) end })
+Movement:Slider({ Name="Fly Speed", Flag="FlySpeed", Min=10, Max=300, Default=50, Rounding=0, Callback=function(v) PlayerFeatures.setFlySpeed(v) end })
+Movement:Divider()
+Movement:Toggle({ Name="Fly Spin", Flag="FlySpin", Default=false, Callback=function(v) PlayerFeatures.setFlySpin(v) end })
+Movement:Slider({ Name="Spin Speed", Flag="SpinSpeed", Min=5, Max=200, Default=50, Rounding=0, Callback=function(v) PlayerFeatures.setFlySpinSpeed(v) end })
+Movement:Divider()
+Movement:Toggle({ Name="Infinite Jump", Flag="InfJump", Default=false, Callback=function(v) 
+    if v then
+        UserInputService.JumpRequest:Connect(function()
+            if Library.Flags["InfJump"] then
                 local char = lp.Character
-                local hum  = char and char:FindFirstChildOfClass("Humanoid")
+                local hum = char and char:FindFirstChildOfClass("Humanoid")
                 if hum then hum:ChangeState(Enum.HumanoidStateType.Jumping) end
-            end)
-        end
+            end
+        end)
     end
-})
+end })
 
-SecChar:Slider({
-    Name="Jump Power", Flag="JumpPower", Min=7, Max=500, Default=7, Decimals=1, Suffix="",
-    Callback=function(v)
-        local char = lp.Character
-        local hum  = char and char:FindFirstChildOfClass("Humanoid")
-        if hum then hum.JumpPower = v end
+-- ========== GLITCH TAB ==========
+local GlitchTab = Window:Page({ Name = "Glitch", Icon = "zap" })
+
+local SanguineBox = GlitchTab:Section({ Name = "Sanguine Glitch", Side = 1 })
+SanguineBox:Toggle({ Name="Sanguine Z Boost", Flag="Sanguine", Default=false, Callback=function(v) Glitch.setSanguine(v) end })
+SanguineBox:Slider({ Name="Puissance", Flag="SangPower", Min=100, Max=5000, Default=1000, Rounding=0, Callback=function(v) Glitch.setSanguinePower(v) end })
+SanguineBox:Slider({ Name="Durée", Flag="SangDur", Min=0.1, Max=2, Default=0.9, Rounding=2, Suffix="s", Callback=function(v) Glitch.setSanguineDuration(v) end })
+
+local DiamondBox = GlitchTab:Section({ Name = "Diamond Glitch", Side = 2 })
+DiamondBox:Toggle({ Name="Diamond Glitch", Flag="Diamond", Default=false, Callback=function(v) Glitch.setDiamond(v) end })
+DiamondBox:Slider({ Name="Puissance", Flag="DiaPower", Min=100, Max=5000, Default=400, Rounding=0, Callback=function(v) Glitch.setDiamondPower(v) end })
+DiamondBox:Slider({ Name="Durée", Flag="DiaDur", Min=0.1, Max=2, Default=0.9, Rounding=2, Suffix="s", Callback=function(v) Glitch.setDiamondDuration(v) end })
+DiamondBox:Slider({ Name="Charge Min", Flag="DiaCharge", Min=0.1, Max=5, Default=1, Rounding=1, Suffix="s", Callback=function(v) Glitch.setDiamondCharge(v) end })
+
+-- ========== VISUAL TAB ==========
+local VisualTab = Window:Page({ Name = "Visual", Icon = "eye" })
+
+-- ESP Players
+local ESPPlayers = VisualTab:Section({ Name = "ESP Players", Side = 1 })
+ESPPlayers:Toggle({ Name="ESP Players", Flag="ESPPlayers", Default=false, Callback=function(v) ESP.setEnabled(v) end })
+ESPPlayers:Divider()
+ESPPlayers:Toggle({ Name="Box", Flag="ESPBox", Default=true, Callback=function(v) ESP.setBox(v) end })
+ESPPlayers:Toggle({ Name="Corner Box", Flag="ESPCorner", Default=false, Callback=function(v) ESP.setCornerBox(v) end })
+ESPPlayers:Toggle({ Name="Filled Box", Flag="ESPFilled", Default=false, Callback=function(v) ESP.setFilledBox(v) end })
+ESPPlayers:Toggle({ Name="Lines", Flag="ESPLines", Default=true, Callback=function(v) ESP.setLines(v) end })
+ESPPlayers:Divider()
+ESPPlayers:Toggle({ Name="Name", Flag="ESPName", Default=true, Callback=function(v) ESP.setName(v) end })
+ESPPlayers:Toggle({ Name="Distance", Flag="ESPDist", Default=true, Callback=function(v) ESP.setDistance(v) end })
+ESPPlayers:Toggle({ Name="Team", Flag="ESPTeam", Default=false, Callback=function(v) ESP.setTeam(v) end })
+ESPPlayers:Toggle({ Name="Bounty", Flag="ESPBounty", Default=false, Callback=function(v) ESP.setBounty(v) end })
+ESPPlayers:Toggle({ Name="Weapon", Flag="ESPWeapon", Default=false, Callback=function(v) ESP.setWeapon(v) end })
+ESPPlayers:Divider()
+ESPPlayers:Toggle({ Name="Health Bar", Flag="ESPHpBar", Default=true, Callback=function(v) ESP.setHealthBar(v) end })
+ESPPlayers:Toggle({ Name="Health Number", Flag="ESPHpNum", Default=false, Callback=function(v) ESP.setHealthNum(v) end })
+ESPPlayers:Divider()
+ESPPlayers:Toggle({ Name="Skeleton", Flag="ESPSkel", Default=false, Callback=function(v) ESP.setSkeleton(v) end })
+ESPPlayers:Toggle({ Name="Head Dot", Flag="ESPHead", Default=false, Callback=function(v) ESP.setHeadDot(v) end })
+ESPPlayers:Toggle({ Name="Off-Screen Arrows", Flag="ESPArrow", Default=false, Callback=function(v) ESP.setOffScreen(v) end })
+ESPPlayers:Toggle({ Name="Chams", Flag="ESPChams", Default=false, Callback=function(v) ESP.setChams(v) end })
+
+-- ESP NPC
+local ESPNPC = VisualTab:Section({ Name = "ESP NPC", Side = 2 })
+ESPNPC:Toggle({ Name="ESP NPCs", Flag="ESPNPC", Default=false, Callback=function(v) ESP.setNPCEnabled(v) end })
+ESPNPC:Divider()
+ESPNPC:Toggle({ Name="Box", Flag="ESPNPCBox", Default=true, Callback=function(v) ESP.setNPCBox(v) end })
+ESPNPC:Toggle({ Name="Name", Flag="ESPNPCName", Default=true, Callback=function(v) ESP.setNPCName(v) end })
+ESPNPC:Toggle({ Name="Distance", Flag="ESPNPCDist", Default=true, Callback=function(v) ESP.setNPCDist(v) end })
+ESPNPC:Toggle({ Name="Health Bar", Flag="ESPNPCHp", Default=true, Callback=function(v) ESP.setNPCHp(v) end })
+ESPNPC:Toggle({ Name="Chams", Flag="ESPNPCChams", Default=false, Callback=function(v) ESP.setNPCChams(v) end })
+
+-- World (Remove Lava)
+local WorldBox = VisualTab:Section({ Name = "World", Side = 1 })
+WorldBox:Toggle({ Name="Remove Lava", Flag="NoLava", Default=false, Callback=function(v)
+    for _, o in workspace:GetDescendants() do
+        if o.Name:lower():find("lava") then pcall(function() o.CanTouch = not v end) end
     end
-})
+end })
 
--- ══════════════════════════════════════════════
---  TAB 4 — SETTINGS
--- ══════════════════════════════════════════════
+-- ========== SETTINGS TAB ==========
 Library:CreateSettingsPage(Window, KeybindList)
 
--- ══════════════════════════════════════════════
---  INIT
--- ══════════════════════════════════════════════
+-- ========== INIT ==========
 Window:Init()
 
 Library:Notification({
     Title       = "Nameless Client",
-    Description = "Silent Aim chargé - M1 exclus (InvokeServer TAP ignoré) + suppression MouseMod",
+    Description = "All features loaded — Silent Aim, Soru Auto Aim, Glitches, ESP, Player features",
     Duration    = 3,
     Icon        = "73789337996373"
 })
+
+print("✅ Nameless Client | All-in-One | By HimselfZen")
