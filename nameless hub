@@ -1,269 +1,285 @@
--- =====================================================================
--- NAMELESS.CLIENT | Obsidian UI + Silent Aim (Z/X/C/V/F only)
--- By HimselfZen
--- =====================================================================
+-- ================================================
+--  Nameless Client — All Features
+--  By HimselfZen
+-- ================================================
 
-local repo = "https://raw.githubusercontent.com/deividcomsono/Obsidian/main/"
-local Library     = loadstring(game:HttpGet(repo .. "Library.lua"))()
-local ThemeManager = loadstring(game:HttpGet(repo .. "addons/ThemeManager.lua"))()
-local SaveManager  = loadstring(game:HttpGet(repo .. "addons/SaveManager.lua"))()
+-- Chargement de la librairie
+local Library = loadstring(game:HttpGet(
+    "https://raw.githubusercontent.com/ApparentlyZen/nameless_lib.lua/refs/heads/main/nameless_lib.lua"
+))()
 
-local Options = Library.Options
-local Toggles = Library.Toggles
+Library.Folders = {
+    Directory = "Nameless Client",
+    Configs   = "Nameless Client/Configs",
+    Assets    = "Nameless Client/Assets"
+}
+for _, f in { Library.Folders.Directory, Library.Folders.Configs, Library.Folders.Assets } do
+    if not isfolder(f) then makefolder(f) end
+end
 
--- =====================================================================
--- SERVICES
--- =====================================================================
-local Players          = game:GetService("Players")
-local RunService       = game:GetService("RunService")
+-- ================================================
+--  SERVICES
+-- ================================================
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
-local RS               = game:GetService("ReplicatedStorage")
-local player           = Players.LocalPlayer
-local camera           = workspace.CurrentCamera
-local MouseModule      = RS:FindFirstChild("Mouse")
-
--- =====================================================================
--- SILENT AIM SIMPLE (Z/X/C/V/F only)
--- =====================================================================
-local SilentAimPlayersEnabled = false
-local SilentAimNPCsEnabled    = false
-local PredictionEnabled       = false
-local PredictionAmount        = 0.1
-local maxRange                = 1000
-local HighlightEnabled        = false
-local ZSkillsEnabled          = false
-
-local PlayersPosition   = nil
-local NPCPosition       = nil
-local renderConnection  = nil
-local currentHighlight  = nil
-local currentTargetType = nil
-local Selectedplayer    = nil
-local zSkillActive      = false
-
-local function getHRP(model)
-    return model and model:FindFirstChild("HumanoidRootPart")
-end
-
-local function isAllyWithMe(targetPlayer)
-    local myGui = player:FindFirstChild("PlayerGui")
-    if not myGui then return false end
-    local scrolling = myGui:FindFirstChild("Main")
-        and myGui.Main:FindFirstChild("Allies")
-        and myGui.Main.Allies:FindFirstChild("Container")
-        and myGui.Main.Allies.Container:FindFirstChild("Allies")
-        and myGui.Main.Allies.Container.Allies:FindFirstChild("ScrollingFrame")
-    if scrolling then
-        for _, frame in pairs(scrolling:GetDescendants()) do
-            if frame:IsA("ImageButton") and frame.Name == targetPlayer.Name then return true end
-        end
-    end
-    return false
-end
-
-local function isEnemy(targetPlayer)
-    if not targetPlayer or targetPlayer == player then return false end
-    local myTeam = player.Team
-    local targetTeam = targetPlayer.Team
-    if myTeam and targetTeam then
-        if myTeam.Name == "Pirates" and targetTeam.Name == "Marines" then return true end
-        if myTeam.Name == "Marines" and targetTeam.Name == "Pirates" then return true end
-        if myTeam.Name == "Pirates" and targetTeam.Name == "Pirates" then
-            return not isAllyWithMe(targetPlayer)
-        end
-        if myTeam.Name == "Marines" and targetTeam.Name == "Marines" then return false end
-    end
-    return true
-end
-
-local function getClosestPlayer(lpHRP)
-    if not lpHRP then return nil end
-    if Selectedplayer and Selectedplayer.Character then
-        local hrp = getHRP(Selectedplayer.Character)
-        if hrp then return Selectedplayer end
-    end
-    local closest, closestDist = nil, maxRange
-    for _, pl in ipairs(Players:GetPlayers()) do
-        if pl ~= player and isEnemy(pl) and pl.Character then
-            local hum = pl.Character:FindFirstChildWhichIsA("Humanoid")
-            local hrp = getHRP(pl.Character)
-            if hum and hum.Health > 0 and hrp then
-                local dist = (hrp.Position - lpHRP.Position).Magnitude
-                if dist < closestDist then closestDist = dist closest = pl end
-            end
-        end
-    end
-    return closest
-end
-
-local function getClosestNPC(lpHRP)
-    if not lpHRP then return nil end
-    local enemiesFolder = workspace:FindFirstChild("Enemies")
-    if not enemiesFolder then return nil end
-    local closest, closestDist = nil, maxRange
-    for _, npc in ipairs(enemiesFolder:GetChildren()) do
-        if npc:IsA("Model") then
-            local hum = npc:FindFirstChildWhichIsA("Humanoid")
-            local hrp = getHRP(npc)
-            if hum and hum.Health > 0 and hrp then
-                local dist = (hrp.Position - lpHRP.Position).Magnitude
-                if dist < closestDist then closestDist = dist closest = npc end
-            end
-        end
-    end
-    return closest
-end
-
-local function getPredictedPosition(hrp)
-    if not hrp then return nil end
-    if not PredictionEnabled then return hrp.Position end
-    local hum = hrp.Parent:FindFirstChildOfClass("Humanoid")
-    if hum and hum.WalkSpeed >= 5 then return hrp.Position + (hrp.Velocity * PredictionAmount) end
-    return hrp.Position
-end
-
-local function clearHighlight()
-    if currentHighlight then currentHighlight:Destroy() currentHighlight = nil currentTargetType = nil end
-end
-
-local function applyHighlight(targetModel, targetType)
-    if not HighlightEnabled or not targetModel then return end
-    if currentHighlight and currentHighlight.Adornee == targetModel then return end
-    clearHighlight()
-    local hl = Instance.new("Highlight")
-    hl.FillColor = Color3.fromRGB(255,255,0)
-    hl.OutlineColor = Color3.fromRGB(255,255,0)
-    hl.FillTransparency = 0.5
-    hl.OutlineTransparency = 0
-    hl.Adornee = targetModel
-    hl.Parent = targetModel
-    currentHighlight = hl
-    currentTargetType = targetType
-end
-
-local function startRenderLoop()
-    if renderConnection then return end
-    renderConnection = RunService.RenderStepped:Connect(function()
-        local lpChar = player.Character
-        if not lpChar then return end
-        local lpHRP = lpChar:FindFirstChild("HumanoidRootPart")
-        if not lpHRP then return end
-        if not SilentAimPlayersEnabled and not SilentAimNPCsEnabled then return end
-        if not zSkillActive then return end
-
-        local targetModel, lookTargetPos = nil, nil
-
-        if SilentAimPlayersEnabled then
-            local targetPlayer = getClosestPlayer(lpHRP)
-            if targetPlayer and targetPlayer.Character then
-                local hrp = getHRP(targetPlayer.Character)
-                PlayersPosition = getPredictedPosition(hrp)
-                lookTargetPos = PlayersPosition
-                targetModel = targetPlayer.Character
-                applyHighlight(targetModel, "player")
-            else
-                PlayersPosition = nil
-            end
-        elseif currentTargetType == "player" then
-            PlayersPosition = nil
-            clearHighlight()
-        end
-
-        if SilentAimNPCsEnabled and not PlayersPosition then
-            local npc = getClosestNPC(lpHRP)
-            if npc then
-                local hrp = getHRP(npc)
-                NPCPosition = getPredictedPosition(hrp)
-                lookTargetPos = NPCPosition
-                if not targetModel then
-                    targetModel = npc
-                    applyHighlight(targetModel, "NPC")
-                end
-            else
-                NPCPosition = nil
-            end
-        elseif currentTargetType == "NPC" then
-            NPCPosition = nil
-            clearHighlight()
-        end
-
-        if MouseModule and typeof(MouseModule) == "Instance" then
-            local ok, MouseData = pcall(require, MouseModule)
-            if ok and type(MouseData) == "table" then
-                local targetPos = PlayersPosition or NPCPosition
-                if targetPos then
-                    pcall(function()
-                        MouseData.Hit = CFrame.new(targetPos)
-                        MouseData.Target = nil
-                    end)
-                end
-            end
-        end
-    end)
-end
-
-local function stopRenderLoop()
-    if renderConnection then renderConnection:Disconnect() renderConnection = nil end
-    PlayersPosition = nil
-    NPCPosition = nil
-    clearHighlight()
-end
-
--- NAMECALL HOOK (Z/X/C/V/F only)
-local oldNamecall
-oldNamecall = hookmetamethod(game, "__namecall", function(self, V1, V2, ...)
-    local method = getnamecallmethod():lower()
-    if method == "fireserver" or method == "invokeserver" then
-        if V1 == "TAP" then
-            return oldNamecall(self, V1, V2, ...)
-        end
-
-        if typeof(V1) == "string" then
-            local up = V1:upper()
-            if up == "Z" or up == "X" or up == "C" or up == "V" or up == "F" then
-                zSkillActive = true
-                if ZSkillsEnabled and (PlayersPosition or NPCPosition) then
-                    local targetPos = PlayersPosition or NPCPosition
-                    task.delay(1, function() zSkillActive = false end)
-                    if method == "fireserver" and typeof(V2) == "Vector3" then
-                        return oldNamecall(self, V1, targetPos, ...)
-                    elseif method == "invokeserver" and typeof(V2) == "Vector3" then
-                        return oldNamecall(self, V1, targetPos, ...)
-                    end
-                end
-                task.delay(1, function() zSkillActive = false end)
-            end
-        end
-
-        if method == "fireserver" and typeof(V1) == "Vector3" then
-            if SilentAimPlayersEnabled and PlayersPosition then
-                return oldNamecall(self, PlayersPosition, V2, ...)
-            elseif SilentAimNPCsEnabled and NPCPosition then
-                return oldNamecall(self, NPCPosition, V2, ...)
-            end
-        end
-
-        if method == "invokeserver" and typeof(V2) == "Vector3" then
-            if SilentAimPlayersEnabled and PlayersPosition then
-                return oldNamecall(self, V1, PlayersPosition, ...)
-            elseif SilentAimNPCsEnabled and NPCPosition then
-                return oldNamecall(self, V1, NPCPosition, ...)
-            end
-        end
-    end
-    return oldNamecall(self, V1, V2, ...)
-end)
-
--- =====================================================================
--- FAKE ITEMS, MOVEMENT, AUTO KEN (copiés depuis l'original)
--- =====================================================================
+local RS = game:GetService("ReplicatedStorage")
+local player = Players.LocalPlayer
+local camera = workspace.CurrentCamera
 local Mouse = player:GetMouse()
 
--- Fake Korblox
-local fakeKorbloxEnabled  = false
-local fakeKorbloxVersion  = "V1"
-local korbloxMeshes       = {}
+-- ================================================
+--  SILENT AIM MODULE (Z/X/C/V/F only)
+-- ================================================
+local SA = (function()
+    local M = {}
 
+    local UIS = UserInputService
+    local RnSvc = RunService
+    local MouseMod = RS:FindFirstChild("Mouse")
+
+    -- STATE
+    local SAPlayersOn    = false
+    local SANPCsOn       = false
+    local WantsPlayers   = false
+    local WantsNPCs      = false
+    local PredOn         = false
+    local HighlightOn    = false
+    local ZSkillsOn      = false
+    local maxRange       = 1000
+    local predAmt        = 0.1
+    local Selected       = nil
+    local zSkillActive   = false
+
+    local renderConn   = nil
+    local curHighlight = nil
+    local curTgtType   = nil
+    local PlPos        = nil
+    local NPCPos       = nil
+
+    local curTool    = nil
+    local charConns  = {}
+
+    -- HELPERS
+    local function getHRP(m) return m and m:FindFirstChild("HumanoidRootPart") end
+
+    local function clearConns()
+        for _, c in ipairs(charConns) do pcall(function() c:Disconnect() end) end
+        charConns = {}
+    end
+
+    local function isAlly(tp)
+        local g = player:FindFirstChild("PlayerGui") if not g then return false end
+        local sf = g:FindFirstChild("Main") and g.Main:FindFirstChild("Allies")
+            and g.Main.Allies:FindFirstChild("Container")
+            and g.Main.Allies.Container:FindFirstChild("Allies")
+            and g.Main.Allies.Container.Allies:FindFirstChild("ScrollingFrame")
+        if sf then
+            for _, f in pairs(sf:GetDescendants()) do
+                if f:IsA("ImageButton") and f.Name == tp.Name then return true end
+            end
+        end
+        return false
+    end
+
+    local function isEnemy(tp)
+        if not tp or tp == player then return false end
+        local mt, tt = player.Team, tp.Team
+        if mt and tt then
+            if mt.Name == "Pirates" and tt.Name == "Marines" then return true end
+            if mt.Name == "Marines" and tt.Name == "Pirates" then return true end
+            if mt.Name == "Pirates" and tt.Name == "Pirates" then return not isAlly(tp) end
+            if mt.Name == "Marines" and tt.Name == "Marines" then return false end
+        end
+        return true
+    end
+
+    local function predicted(hrp)
+        if not hrp then return nil end
+        local hum = hrp.Parent:FindFirstChildOfClass("Humanoid")
+        if not PredOn or not hum or hum.WalkSpeed < 5 then return hrp.Position end
+        return hrp.Position + hrp.Velocity * predAmt
+    end
+
+    local function closestPlayer(lpHRP)
+        if not lpHRP then return nil end
+        if Selected and Selected.Character and getHRP(Selected.Character) then return Selected end
+        local best, bd = nil, math.huge
+        for _, pl in ipairs(Players:GetPlayers()) do
+            if pl ~= player and isEnemy(pl) and pl.Character then
+                local hum = pl.Character:FindFirstChildOfClass("Humanoid")
+                local hrp = getHRP(pl.Character)
+                if hum and hum.Health > 0 and hrp then
+                    local d = (hrp.Position - lpHRP.Position).Magnitude
+                    if d <= maxRange and d < bd then bd = d best = pl end
+                end
+            end
+        end
+        return best
+    end
+
+    local function closestNPC(lpHRP)
+        if not lpHRP then return nil end
+        local ef = workspace:FindFirstChild("Enemies") if not ef then return nil end
+        local best, bd = nil, math.huge
+        for _, npc in ipairs(ef:GetChildren()) do
+            if npc:IsA("Model") then
+                local hum = npc:FindFirstChildOfClass("Humanoid")
+                local hrp = getHRP(npc)
+                if hum and hum.Health > 0 and hrp then
+                    local d = (hrp.Position - lpHRP.Position).Magnitude
+                    if d <= maxRange and d < bd then bd = d best = npc end
+                end
+            end
+        end
+        return best
+    end
+
+    -- HIGHLIGHT
+    local function clearHL()
+        if curHighlight then pcall(function() curHighlight:Destroy() end) curHighlight = nil end
+        curTgtType = nil
+    end
+
+    local function applyHL(model, ttype)
+        if not HighlightOn or not model then return end
+        if curHighlight and curHighlight.Adornee == model then return end
+        clearHL()
+        local h = Instance.new("Highlight")
+        h.FillTransparency    = 0.5
+        h.OutlineTransparency = 0
+        h.FillColor    = ttype == "Player" and Color3.fromRGB(255,50,50) or Color3.fromRGB(255,165,0)
+        h.OutlineColor = Color3.new(1,1,1)
+        h.Adornee = model h.Parent = model
+        curHighlight = h curTgtType = ttype
+    end
+
+    -- RENDER LOOP
+    local function stopLoop()
+        if renderConn then pcall(function() renderConn:Disconnect() end) renderConn = nil end
+        PlPos = nil NPCPos = nil clearHL()
+    end
+
+    local function startLoop()
+        if renderConn then return end
+        renderConn = RnSvc.Heartbeat:Connect(function()
+            if not SAPlayersOn and not SANPCsOn then return end
+            if not zSkillActive then return end
+
+            local char  = player.Character
+            local lpHRP = char and getHRP(char)
+            if not lpHRP then return end
+
+            if SAPlayersOn then
+                local t = closestPlayer(lpHRP)
+                if t and t.Character then
+                    local hrp = getHRP(t.Character)
+                    if hrp then PlPos = predicted(hrp) applyHL(t.Character,"Player") end
+                else PlPos = nil if curTgtType=="Player" then clearHL() end end
+            else PlPos = nil end
+
+            if SANPCsOn and not PlPos then
+                local n = closestNPC(lpHRP)
+                if n then
+                    local hrp = getHRP(n)
+                    if hrp then NPCPos = predicted(hrp) applyHL(n,"NPC") end
+                else NPCPos = nil if curTgtType=="NPC" then clearHL() end end
+            else if not SAPlayersOn then NPCPos = nil end end
+
+            local tgt = PlPos and CFrame.new(PlPos) or NPCPos and CFrame.new(NPCPos)
+            if tgt and MouseMod then
+                local ok, md = pcall(require, MouseMod)
+                if ok and type(md)=="table" then md.Hit = tgt md.Target = nil end
+            end
+        end)
+    end
+
+    -- TOOL HOOK
+    local function hookTool(tool)
+        if not tool then return end
+        curTool = tool
+        table.insert(charConns, tool.AncestryChanged:Connect(function(_, parent)
+            if not parent then curTool = nil end
+        end))
+    end
+
+    -- NAMECALL HOOK (Z/X/C/V/F)
+    if not getgenv().NamelessHooked then
+        getgenv().NamelessHooked = true
+        local old
+        old = hookmetamethod(game, "__namecall", function(self, ...)
+            local method = getnamecallmethod()
+            local args   = { ... }
+            if method == "InvokeServer" or method == "FireServer" then
+                local a1 = args[1]
+                if typeof(a1) == "string" then
+                    local up = a1:upper()
+                    if up == "Z" or up == "X" or up == "C" or up == "V" or up == "F" then
+                        zSkillActive = true
+                        if ZSkillsOn and (PlPos or NPCPos) then
+                            local targetPos = PlPos or NPCPos
+                            task.delay(1, function() zSkillActive = false end)
+                            if method == "InvokeServer" and typeof(args[2]) == "Vector3" then
+                                return old(self, up, targetPos, select(3, ...))
+                            elseif method == "FireServer" and typeof(args[2]) == "Vector3" then
+                                return old(self, up, targetPos, select(3, ...))
+                            end
+                        end
+                        task.delay(1, function() zSkillActive = false end)
+                    end
+                end
+            end
+            return old(self, ...)
+        end)
+    end
+
+    -- CHARACTER ADDED
+    local function onCharAdded(char)
+        clearConns()
+        zSkillActive = false
+        for _, c in ipairs(char:GetChildren()) do if c:IsA("Tool") then hookTool(c) end end
+        table.insert(charConns, char.ChildAdded:Connect(function(c)
+            if c:IsA("Tool") then hookTool(c) end
+        end))
+        table.insert(charConns, char.ChildRemoved:Connect(function(c)
+            if c == curTool then curTool = nil end
+        end))
+    end
+
+    player.CharacterAdded:Connect(onCharAdded)
+    if player.Character then onCharAdded(player.Character) end
+
+    -- PUBLIC API
+    function M:SetPlayerSilentAim(state)
+        WantsPlayers = state SAPlayersOn = state
+        if state then startLoop() else if not SANPCsOn then stopLoop() end end
+    end
+    function M:SetNPCSilentAim(state)
+        WantsNPCs = state SANPCsOn = state
+        if state then startLoop() else if not SAPlayersOn then stopLoop() end end
+    end
+    function M:SetPrediction(state)      PredOn = state end
+    function M:SetPredictionAmount(n)    if type(n)=="number" then predAmt = n end end
+    function M:SetDistanceLimit(n)       if type(n)=="number" then maxRange = n end end
+    function M:SetHighlight(state)       HighlightOn = state if not state then clearHL() end end
+    function M:SetZSkills(state)         ZSkillsOn = state end
+    function M:SetSelectedPlayer(name)
+        if not name or name=="" then Selected=nil return end
+        local f = Players:FindFirstChild(name) if f then Selected=f end
+    end
+
+    return M
+end)()
+
+-- ================================================
+--  FAKE ITEMS, MOVEMENT, GLITCH, ESP, AUTO KEN
+--  (Repris du script Obsidian)
+-- ================================================
+
+-- FAKE KORBLOX
+local fakeKorbloxEnabled = false
+local fakeKorbloxVersion = "V1"
+local korbloxMeshes = {}
 local function applyFakeKorblox()
     local char = player.Character if not char then return end
     local rl  = char:FindFirstChild("RightUpperLeg")
@@ -286,7 +302,6 @@ local function applyFakeKorblox()
         end
     end
 end
-
 local function removeFakeKorblox()
     for _, m in pairs(korbloxMeshes) do pcall(function() m:Destroy() end) end
     korbloxMeshes = {}
@@ -296,11 +311,10 @@ local function removeFakeKorblox()
     end
 end
 
--- Fake Headless
+-- FAKE HEADLESS
 local fakeHeadlessEnabled = false
 local fakeHeadlessVersion = "V1"
-local hiddenHairAcc       = {}
-
+local hiddenHairAcc = {}
 local function applyFakeHeadless()
     local char = player.Character if not char then return end
     local head = char:FindFirstChild("Head")
@@ -319,7 +333,6 @@ local function applyFakeHeadless()
         end
     end
 end
-
 local function removeFakeHeadless()
     local char = player.Character if not char then return end
     local head = char:FindFirstChild("Head")
@@ -332,46 +345,40 @@ local function removeFakeHeadless()
     hiddenHairAcc = {}
 end
 
--- Stretched Screen
+-- STRETCHED SCREEN
 local stretchedEnabled = false
-local stretchedAmount  = 0.65
-local stretchConn      = nil
-
+local stretchedAmount = 0.65
+local stretchConn = nil
 local function applyStretched()
     if stretchConn then stretchConn:Disconnect() end
-    local cam = workspace.CurrentCamera
     stretchConn = RunService.RenderStepped:Connect(function()
-        if cam and stretchedEnabled then
-            cam.CFrame = cam.CFrame * CFrame.new(0,0,0,1,0,0,0,stretchedAmount,0,0,0,1)
+        if camera and stretchedEnabled then
+            camera.CFrame = camera.CFrame * CFrame.new(0,0,0,1,0,0,0,stretchedAmount,0,0,0,1)
         end
     end)
 end
-
 local function removeStretched()
     if stretchConn then stretchConn:Disconnect() stretchConn = nil end
 end
 
--- Jump Boost
+-- JUMP BOOST
 local jumpEnabled = false
-local jumpPower   = 100
-
+local jumpPower = 100
 local function applyJump()
     local char = player.Character if not char then return end
     local hum = char:FindFirstChildOfClass("Humanoid")
     if hum then hum.JumpPower = jumpPower end
 end
-
 local function resetJump()
     local char = player.Character if not char then return end
     local hum = char:FindFirstChildOfClass("Humanoid")
     if hum then hum.JumpPower = 50 end
 end
 
--- Speed Hack
+-- SPEED HACK
 local speedEnabled = false
-local speedValue   = 50
-local speedConn    = nil
-
+local speedValue = 50
+local speedConn = nil
 local function applySpeed()
     if speedConn then speedConn:Disconnect() speedConn = nil end
     speedConn = RunService.Heartbeat:Connect(function()
@@ -381,7 +388,6 @@ local function applySpeed()
         if h then h.WalkSpeed = speedValue end
     end)
 end
-
 local function resetSpeed()
     if speedConn then speedConn:Disconnect() speedConn = nil end
     local char = player.Character if not char then return end
@@ -389,16 +395,16 @@ local function resetSpeed()
     if hum then hum.WalkSpeed = 16 end
 end
 
--- Fly Normal
-local flyEnabled  = false
-local flyConn     = nil
-local flyAtt      = nil
-local flyLV       = nil
-local flySpeed    = 50
-local flyMiniGui    = nil
+-- FLY NORMAL
+local flyEnabled = false
+local flyConn = nil
+local flyAtt = nil
+local flyLV = nil
+local flySpeed = 50
+local flyMiniGui = nil
 local flyMiniActive = false
-local _flyUp        = false
-local _flyDown      = false
+local _flyUp = false
+local _flyDown = false
 
 local function createFlyMiniToggle()
     local playerGui = player:WaitForChild("PlayerGui")
@@ -530,7 +536,6 @@ end
 
 local function startFly()
     createFlyMiniToggle()
-    local cam = workspace.CurrentCamera
     flyConn = RunService.RenderStepped:Connect(function()
         if not flyEnabled or not flyMiniActive then return end
         local char = player.Character if not char then return end
@@ -538,7 +543,7 @@ local function startFly()
         local hum = char:FindFirstChildOfClass("Humanoid") if not hum then return end
         if not flyLV or not flyAtt then return end
         local moveDir = Vector3.new(0,0,0)
-        local cf = cam.CFrame
+        local cf = camera.CFrame
 
         local md = hum.MoveDirection
         if md.Magnitude > 0.1 then
@@ -567,12 +572,12 @@ local function stopFly()
     local hum = char:FindFirstChildOfClass("Humanoid") if hum then hum.PlatformStand = false end
 end
 
--- Fly Spin
+-- FLY SPIN
 local flySpinEnabled = false
-local flySpinConn    = nil
-local flySpinAngle   = 0
-local flySpinSpeed   = 50
-local flySpinMiniGui    = nil
+local flySpinConn = nil
+local flySpinAngle = 0
+local flySpinSpeed = 50
+local flySpinMiniGui = nil
 local flySpinMiniActive = false
 
 local function createFlySpinMiniToggle()
@@ -636,7 +641,7 @@ local function stopFlySpin()
     flySpinAngle = 0
 end
 
--- Auto Ken
+-- AUTO KEN
 local AutoKen = false
 local autoKenRunning = false
 local commE = RS:FindFirstChild("Remotes") and RS.Remotes:FindFirstChild("CommE")
@@ -666,21 +671,19 @@ local function startAutoKenLoop()
     end)
 end
 
--- =====================================================================
--- GLITCH FEATURES (Sanguine, Diamond)
--- =====================================================================
-local multiEnabled    = false
-local multiPower      = 400
-local multiDuration   = 0.9
-local multiCharging   = false
+-- GLITCH FEATURES
+local multiEnabled = false
+local multiPower = 400
+local multiDuration = 0.9
+local multiCharging = false
 local multiChargeStart = 0
 
-local diamondEnabled         = false
-local diamondPower           = 400
-local diamondDuration        = 0.9
-local diamondRequiredCharge  = 1.0
-local diamondCharging        = false
-local diamondChargeStart     = 0
+local diamondEnabled = false
+local diamondPower = 400
+local diamondDuration = 0.9
+local diamondRequiredCharge = 1.0
+local diamondCharging = false
+local diamondChargeStart = 0
 
 local function MegaBoost()
     local char = player.Character
@@ -765,35 +768,33 @@ RunService.Heartbeat:Connect(function()
     end
 end)
 
--- =====================================================================
--- ESP MODULE
--- =====================================================================
-local ESPEnabled      = false
-local ESPBox          = true
-local ESPCornerBox    = false
-local ESPFilledBox    = false
-local ESPLines        = true
-local ESPName         = true
-local ESPDistance     = true
-local ESPHealthBar    = true
-local ESPHealthNum    = false
-local ESPWeapon       = false
-local ESPTeam         = false
-local ESPBounty       = false
-local ESPSkeleton     = false
-local ESPHeadDot      = false
-local ESPOffScreen    = false
-local ESPChams        = false
-local ESPNPCEnabled   = false
-local ESPNPCBox_v     = true
-local ESPNPCName_v    = true
-local ESPNPCDist_v    = true
-local ESPNPCHp_v      = true
-local ESPNPCChams_v   = false
+-- ESP MODULE (simplifié, mais complet)
+local ESPEnabled = false
+local ESPNPCEnabled = false
+local ESPBox = true
+local ESPCornerBox = false
+local ESPFilledBox = false
+local ESPLines = true
+local ESPName = true
+local ESPDistance = true
+local ESPHealthBar = true
+local ESPHealthNum = false
+local ESPWeapon = false
+local ESPTeam = false
+local ESPBounty = false
+local ESPSkeleton = false
+local ESPHeadDot = false
+local ESPOffScreen = false
+local ESPChams = false
+local ESPNPCBox_v = true
+local ESPNPCName_v = true
+local ESPNPCDist_v = true
+local ESPNPCHp_v = true
+local ESPNPCChams_v = false
 
-local espObjects      = {}
-local espConnection   = nil
-local chamsObjects    = {}
+local espObjects = {}
+local espConnection = nil
+local chamsObjects = {}
 
 local function worldToViewport(pos)
     local cam = workspace.CurrentCamera
@@ -808,25 +809,13 @@ local function getCharBounds(char)
     local head = char:FindFirstChild("Head")
     local topPos = head and head.Position + Vector3.new(0, head.Size.Y/2 + 0.2, 0) or hrp.Position + Vector3.new(0, 3, 0)
     local botPos = hrp.Position - Vector3.new(0, 3, 0)
-
     local topScreen, topOn, topZ = worldToViewport(topPos)
     local botScreen, botOn = worldToViewport(botPos)
-
     if not topOn and not botOn then return nil end
-
     local h = math.abs(topScreen.Y - botScreen.Y)
     local w = h * 0.6
     local cx = topScreen.X
-
-    return {
-        top = topScreen,
-        bot = botScreen,
-        cx = cx,
-        w = w,
-        h = h,
-        depth = topZ,
-        onScreen = topOn or botOn,
-    }
+    return { top = topScreen, bot = botScreen, cx = cx, w = w, h = h, depth = topZ, onScreen = topOn or botOn }
 end
 
 local function createDrawings(key)
@@ -853,31 +842,25 @@ local function createDrawings(key)
     d.sk = {}
     for i = 1, 12 do d.sk[i] = Drawing.new("Line") end
     d.arrow     = Drawing.new("Triangle")
-
     for _, obj in pairs(d) do if type(obj) ~= "table" then obj.Visible = false end end
     for _, obj in ipairs(d.sk) do obj.Visible = false end
-
     for _, b in ipairs({d.boxTop,d.boxBot,d.boxLeft,d.boxRight,
-        d.cTL1,d.cTL2,d.cTR1,d.cTR2,d.cBL1,d.cBL2,d.cBR1,d.cBR2}) do
-        b.Thickness = 1
-    end
+        d.cTL1,d.cTL2,d.cTR1,d.cTR2,d.cBL1,d.cBL2,d.cBR1,d.cBR2}) do b.Thickness = 1 end
     d.line.Thickness = 1
     d.hpBg.Thickness = 4 d.hpFill.Thickness = 4
     for _, s in ipairs(d.sk) do s.Thickness = 1 s.Transparency = 0.3 end
-
     for _, t in ipairs({d.name, d.dist, d.hpNum, d.weapon, d.team, d.bounty}) do
         t.Size = 12 t.Center = true t.Outline = true t.Font = 2
     end
-    d.name.Size  = 13
+    d.name.Size = 13
     d.dist.Color = Color3.fromRGB(200,200,200)
     d.hpNum.Color = Color3.fromRGB(255,255,255)
     d.weapon.Color = Color3.fromRGB(255,220,100)
-    d.team.Color   = Color3.fromRGB(100,200,255)
+    d.team.Color = Color3.fromRGB(100,200,255)
     d.bounty.Color = Color3.fromRGB(255,180,50)
     d.headDot.Radius = 4 d.headDot.Thickness = 1 d.headDot.Filled = true
     d.filled.Transparency = 0.7
     d.arrow.Thickness = 1 d.arrow.Filled = true
-
     espObjects[key] = d
     return d
 end
@@ -997,9 +980,7 @@ local function updateESP(target, key, isNPC)
     d.cBL2.From=Vector2.new(left,botY) d.cBL2.To=Vector2.new(left,botY-cl)
     d.cBR1.From=Vector2.new(right,botY) d.cBR1.To=Vector2.new(right-cl,botY)
     d.cBR2.From=Vector2.new(right,botY) d.cBR2.To=Vector2.new(right,botY-cl)
-    for _, b in ipairs({d.cTL1,d.cTL2,d.cTR1,d.cTR2,d.cBL1,d.cBL2,d.cBR1,d.cBR2}) do
-        b.Color=col b.Visible=ESPCornerBox
-    end
+    for _, b in ipairs({d.cTL1,d.cTL2,d.cTR1,d.cTR2,d.cBL1,d.cBL2,d.cBR1,d.cBR2}) do b.Color=col b.Visible=ESPCornerBox end
 
     d.filled.Position = Vector2.new(left, topY)
     d.filled.Size = Vector2.new(bounds.w, bounds.h)
@@ -1116,30 +1097,29 @@ local function stopESP()
     for key, _ in pairs(espObjects) do removeDrawings(key) end
 end
 
--- =====================================================================
--- WINDOW OBSIDIAN
--- =====================================================================
-local Window = Library:CreateWindow({
-    Title = "gotcha.exe",
-    Footer = "By HimselfZen",
-    ShowCustomCursor = true,
-    NotifySide = "Right",
+-- ================================================
+--  WINDOW (nameless_lib)
+-- ================================================
+local Window = Library:Window({
+    Name    = "Nameless Client",
+    SubName = "All Features",
+    Logo    = "81786914450484"
 })
 
-local Tabs = {
-    Main     = Window:AddTab("Main",     "home"),
-    Legit    = Window:AddTab("Legit",    "crosshair"),
-    Player   = Window:AddTab("Player",   "user"),
-    Glitch   = Window:AddTab("Glitch",   "zap"),
-    Visual   = Window:AddTab("Visual",   "eye"),
-    Font     = Window:AddTab("Font",     "type"),
-    Settings = Window:AddTab("Settings", "settings"),
-}
+local KeybindList = Library:KeybindList("Keybinds")
+Library:Watermark({ "Nameless Client", "|", "By HimselfZen" })
+if Library.WatermarkFrame then Library.WatermarkFrame.Instance.Visible = true end
 
--- =====================================================================
--- TAB MAIN (Soru Auto Aim)
--- =====================================================================
-local SoruBox = Tabs.Main:AddLeftGroupbox("Soru Auto Aim")
+-- PAGES
+local PageMain = Window:Page({ Name = "Main", Icon = "home" })
+local PageLegit = Window:Page({ Name = "Legit", Icon = "crosshair" })
+local PagePlayer = Window:Page({ Name = "Player", Icon = "user" })
+local PageGlitch = Window:Page({ Name = "Glitch", Icon = "zap" })
+local PageVisual = Window:Page({ Name = "Visual", Icon = "eye" })
+local PageSettings = Window:Page({ Name = "Settings", Icon = "settings" })
+
+-- ========== MAIN (Soru Auto Aim) ==========
+local SoruBox = PageMain:Section({ Name = "Soru Auto Aim", Side = 1, Icon = "81786914450484" })
 
 local soruPlayerNames = {"None"}
 for _, p in pairs(Players:GetPlayers()) do
@@ -1153,7 +1133,7 @@ local SoruAutoAimEnabled = false
 local CurrentTarget = nil
 local SoruSelectedPlayer = nil
 
-local function isSoruAlly(targetPlayer)
+local function isSoruAlly(tp)
     local myGui = player:FindFirstChild("PlayerGui")
     if not myGui then return false end
     local scrolling = myGui:FindFirstChild("Main")
@@ -1163,23 +1143,21 @@ local function isSoruAlly(targetPlayer)
         and myGui.Main.Allies.Container.Allies:FindFirstChild("ScrollingFrame")
     if scrolling then
         for _, frame in pairs(scrolling:GetDescendants()) do
-            if frame:IsA("ImageButton") and frame.Name == targetPlayer.Name then return true end
+            if frame:IsA("ImageButton") and frame.Name == tp.Name then return true end
         end
     end
     return false
 end
 
-local function isSoruEnemy(targetPlayer)
-    if not targetPlayer or targetPlayer == player then return false end
+local function isSoruEnemy(tp)
+    if not tp or tp == player then return false end
     local myTeam = player.Team
-    local targetTeam = targetPlayer.Team
+    local targetTeam = tp.Team
     if myTeam and targetTeam then
-        if myTeam.Name == "Pirates"  and targetTeam.Name == "Marines" then return true end
-        if myTeam.Name == "Marines"  and targetTeam.Name == "Pirates"  then return true end
-        if myTeam.Name == "Pirates"  and targetTeam.Name == "Pirates"  then
-            return not isSoruAlly(targetPlayer)
-        end
-        if myTeam.Name == "Marines"  and targetTeam.Name == "Marines"  then return false end
+        if myTeam.Name == "Pirates" and targetTeam.Name == "Marines" then return true end
+        if myTeam.Name == "Marines" and targetTeam.Name == "Pirates" then return true end
+        if myTeam.Name == "Pirates" and targetTeam.Name == "Pirates" then return not isSoruAlly(tp) end
+        if myTeam.Name == "Marines" and targetTeam.Name == "Marines" then return false end
     end
     return true
 end
@@ -1212,326 +1190,165 @@ task.spawn(function()
     end
 end)
 
--- Hook Mouse.Hit pour Soru Auto Aim
-local mt2 = getrawmetatable(game)
-local oldIndex2 = mt2.__index
-setreadonly(mt2, false)
-mt2.__index = newcclosure(function(t, k)
+-- Hook Mouse.Hit
+local mt = getrawmetatable(game)
+local oldIndex = mt.__index
+setreadonly(mt, false)
+mt.__index = newcclosure(function(t, k)
     if getgenv().SoruAutoAim and t == Mouse and CurrentTarget then
-        if k == "Hit"    then return CurrentTarget.CFrame end
+        if k == "Hit" then return CurrentTarget.CFrame end
         if k == "Target" then return CurrentTarget end
     end
-    return oldIndex2(t, k)
+    return oldIndex(t, k)
 end)
-setreadonly(mt2, true)
+setreadonly(mt, true)
 
-SoruBox:AddToggle("SoruAimToggle", {
-    Text = "Soru Auto Aim", Default = false,
-    Tooltip = "Redirige tes attaques vers l'ennemi le plus proche (ignore les alliés)",
+SoruBox:Toggle({
+    Name = "Soru Auto Aim", Flag = "SoruAimToggle", Default = false,
+    Callback = function(v) getgenv().SoruAutoAim = v if not v then CurrentTarget = nil end end
+})
+
+SoruBox:Dropdown({
+    Name = "Select Target", Flag = "SoruSelectPlayer", Items = soruPlayerNames, Default = "None",
     Callback = function(v)
-        getgenv().SoruAutoAim = v
-        if not v then CurrentTarget = nil end
-    end,
+        if v == "None" then SoruSelectedPlayer = nil
+        else SoruSelectedPlayer = Players:FindFirstChild(v) end
+    end
 })
 
-SoruBox:AddDropdown("SoruSelectPlayer", {
-    Values = soruPlayerNames, Default = 1,
-    Text = "Select Target",
-    Tooltip = "Lock sur un joueur spécifique (None = auto)",
-    Callback = function(v)
-        if v == "None" then
-            SoruSelectedPlayer = nil
-        else
-            local found = Players:FindFirstChild(v)
-            if found then SoruSelectedPlayer = found end
-        end
-    end,
-})
+-- ========== LEGIT (Silent Aim) ==========
+local LegitSA = PageLegit:Section({ Name = "Silent Aim", Side = 1, Icon = "131319188753430" })
 
--- =====================================================================
--- TAB LEGIT (Silent Aim Simple)
--- =====================================================================
-local SAPlayersBox = Tabs.Legit:AddLeftGroupbox("Silent Aim — Players")
-local SANPCBox     = Tabs.Legit:AddRightGroupbox("Silent Aim — NPC")
-
-SAPlayersBox:AddToggle("SilentAimPlayers", {
-    Text = "Silent Aim Players", Default = false,
-    Tooltip = "Redirige tes attaques vers le joueur le plus proche",
-    Callback = function(v)
-        SilentAimPlayersEnabled = v
-        if SilentAimPlayersEnabled or SilentAimNPCsEnabled then
-            startRenderLoop()
-        else
-            stopRenderLoop()
-        end
-    end,
-})
-
-SAPlayersBox:AddToggle("SilentAimNPCs", {
-    Text = "Silent Aim NPCs", Default = false,
-    Tooltip = "Redirige tes attaques vers le NPC le plus proche",
-    Callback = function(v)
-        SilentAimNPCsEnabled = v
-        if SilentAimPlayersEnabled or SilentAimNPCsEnabled then
-            startRenderLoop()
-        else
-            stopRenderLoop()
-        end
-    end,
-})
-
-SAPlayersBox:AddToggle("SkillsRedirect", {
-    Text = "Skills Redirect (Z/X/C/V/F)", Default = false,
-    Tooltip = "Active la redirection pour les skills Z/X/C/V/F",
-    Callback = function(v) ZSkillsEnabled = v end,
-})
-
-SAPlayersBox:AddToggle("Prediction", {
-    Text = "Prediction", Default = false,
-    Tooltip = "Anticipe le mouvement de la cible",
-    Callback = function(v) PredictionEnabled = v end,
-})
-
-SAPlayersBox:AddSlider("PredictionAmount", {
-    Text = "Prediction Amount", Default = 1, Min = 1, Max = 4, Rounding = 0,
-    Suffix = "00ms",
-    Callback = function(v) PredictionAmount = v / 10 end,
-})
-
-SAPlayersBox:AddSlider("DistanceLimit", {
-    Text = "Distance Limit", Default = 1000, Min = 100, Max = 3000, Rounding = 0,
-    Suffix = "m",
-    Callback = function(v) maxRange = v end,
-})
-
-SAPlayersBox:AddToggle("Highlight", {
-    Text = "Target Highlight", Default = false,
-    Tooltip = "Met en surbrillance la cible",
-    Callback = function(v) HighlightEnabled = v if not v then clearHighlight() end end,
-})
+LegitSA:Toggle({ Name="Silent Aim Players", Flag="SAPlayers", Default=false, Callback=function(v) SA:SetPlayerSilentAim(v) end })
+LegitSA:Toggle({ Name="Silent Aim NPCs", Flag="SANpcs", Default=false, Callback=function(v) SA:SetNPCSilentAim(v) end })
+LegitSA:Toggle({ Name="Skills Redirect (Z/X/C/V/F)", Flag="ZSkills", Default=false, Callback=function(v) SA:SetZSkills(v) end })
+LegitSA:Toggle({ Name="Prediction", Flag="SAPred", Default=false, Callback=function(v) SA:SetPrediction(v) end })
+LegitSA:Slider({ Name="Prediction Amount", Flag="SAPredAmt", Min=0.05, Max=0.5, Default=0.1, Decimals=0.01, Suffix="s",
+    Callback=function(v) SA:SetPredictionAmount(v) end })
+LegitSA:Slider({ Name="Distance Limit", Flag="SADist", Min=100, Max=1000, Default=1000, Decimals=50, Suffix="m",
+    Callback=function(v) SA:SetDistanceLimit(v) end })
+LegitSA:Toggle({ Name="Target Highlight", Flag="SAHighlight", Default=false, Callback=function(v) SA:SetHighlight(v) end })
 
 local playerNames = {"None"}
-for _, pl in ipairs(Players:GetPlayers()) do
-    if pl ~= player then table.insert(playerNames, pl.Name) end
-end
-Players.PlayerAdded:Connect(function(p)
-    if p ~= player then table.insert(playerNames, p.Name) end
-end)
+for _, p in pairs(Players:GetPlayers()) do if p ~= player then table.insert(playerNames, p.Name) end end
+LegitSA:Dropdown({ Name="Lock On Player", Flag="SALock", Items=playerNames, Default="None",
+    Callback=function(v) SA:SetSelectedPlayer(v=="None" and nil or v) end })
 
-SAPlayersBox:AddDropdown("SelectPlayer", {
-    Values = playerNames, Default = 1,
-    Text = "Lock On Player",
-    Tooltip = "Lock sur un joueur spécifique (None = auto)",
-    Callback = function(v)
-        if v == "None" then Selectedplayer = nil
-        else Selectedplayer = Players:FindFirstChild(v) end
-    end,
-})
+-- ========== PLAYER ==========
+local PlayerItems = PagePlayer:Section({ Name = "Fake Items", Side = 1, Icon = "81598136527047" })
+PlayerItems:Dropdown({ Name="Korblox Version", Flag="KorbloxVer", Items={"V1","V2"}, Default=1,
+    Callback=function(v) fakeKorbloxVersion=v if fakeKorbloxEnabled then removeFakeKorblox() applyFakeKorblox() end end })
+PlayerItems:Toggle({ Name="Fake Korblox", Flag="FakeKorblox", Default=false,
+    Callback=function(v) fakeKorbloxEnabled=v if v then applyFakeKorblox() else removeFakeKorblox() end end })
+PlayerItems:Divider()
+PlayerItems:Dropdown({ Name="Headless Version", Flag="HeadlessVer", Items={"V1","V2"}, Default=1,
+    Callback=function(v) fakeHeadlessVersion=v if fakeHeadlessEnabled then removeFakeHeadless() applyFakeHeadless() end end })
+PlayerItems:Toggle({ Name="Fake Headless", Flag="FakeHeadless", Default=false,
+    Callback=function(v) fakeHeadlessEnabled=v if v then applyFakeHeadless() else removeFakeHeadless() end end })
+PlayerItems:Divider()
+PlayerItems:Toggle({ Name="Stretched Screen", Flag="Stretched", Default=false,
+    Callback=function(v) stretchedEnabled=v if v then applyStretched() else removeStretched() end end })
+PlayerItems:Slider({ Name="Stretch Amount", Flag="StretchAmt", Min=50, Max=100, Default=65, Suffix="%",
+    Callback=function(v) stretchedAmount=v/100 if stretchedEnabled then applyStretched() end end })
 
-SANPCBox:AddToggle("SilentAimNPC", {
-    Text = "Silent Aim NPC", Default = false,
-    Tooltip = "Redirige tes attaques vers le NPC le plus proche",
-    Callback = function(v)
-        SilentAimNPCsEnabled = v
-        if SilentAimPlayersEnabled or SilentAimNPCsEnabled then
-            startRenderLoop()
-        else
-            stopRenderLoop()
+local PlayerMove = PagePlayer:Section({ Name = "Movement", Side = 2, Icon = "81598136527047" })
+PlayerMove:Toggle({ Name="Jump Boost", Flag="JumpBoost", Default=false,
+    Callback=function(v) jumpEnabled=v if v then applyJump() else resetJump() end end })
+PlayerMove:Slider({ Name="Jump Power", Flag="JumpPower", Min=50, Max=500, Default=100, Rounding=0,
+    Callback=function(v) jumpPower=v if jumpEnabled then applyJump() end end })
+PlayerMove:Divider()
+PlayerMove:Toggle({ Name="Speed Hack", Flag="SpeedHack", Default=false,
+    Callback=function(v) speedEnabled=v if v then applySpeed() else resetSpeed() end end })
+PlayerMove:Slider({ Name="Walk Speed", Flag="SpeedValue", Min=16, Max=50000, Default=50, Rounding=0,
+    Callback=function(v) speedValue=v if speedEnabled then applySpeed() end end })
+PlayerMove:Divider()
+PlayerMove:Toggle({ Name="Fly", Flag="Fly", Default=false,
+    Callback=function(v) flyEnabled=v if v then startFly() else stopFly() end end })
+PlayerMove:Slider({ Name="Fly Speed", Flag="FlySpeed", Min=10, Max=300, Default=50, Rounding=0,
+    Callback=function(v) flySpeed=v end })
+PlayerMove:Divider()
+PlayerMove:Toggle({ Name="Fly Spin", Flag="FlySpin", Default=false,
+    Callback=function(v) flySpinEnabled=v if v then startFlySpin() else stopFlySpin() end end })
+PlayerMove:Slider({ Name="Spin Speed", Flag="SpinSpeed", Min=5, Max=200, Default=50, Rounding=0,
+    Callback=function(v) flySpinSpeed=v end })
+
+local PlayerMisc = PagePlayer:Section({ Name = "Misc", Side = 1, Icon = "81598136527047" })
+PlayerMisc:Toggle({ Name="Auto Ken", Flag="AutoKen", Default=false,
+    Callback=function(v) AutoKen=v if v then startAutoKenLoop() end end })
+
+-- ========== GLITCH ==========
+local GlitchSang = PageGlitch:Section({ Name = "Sanguine Glitch", Side = 1, Icon = "zap" })
+GlitchSang:Toggle({ Name="Sanguine Z Boost", Flag="Sanguine", Default=false,
+    Callback=function(v) multiEnabled=v if not v then multiCharging=false multiChargeStart=0 end end })
+GlitchSang:Slider({ Name="Puissance", Flag="SangPower", Min=100, Max=5000, Default=1000, Suffix=" force",
+    Callback=function(v) multiPower=v end })
+GlitchSang:Slider({ Name="Durée", Flag="SangDur", Min=0.1, Max=2, Default=0.9, Decimals=2, Suffix="s",
+    Callback=function(v) multiDuration=v end })
+
+local GlitchDia = PageGlitch:Section({ Name = "Diamond Glitch", Side = 2, Icon = "zap" })
+GlitchDia:Toggle({ Name="Diamond Glitch", Flag="Diamond", Default=false,
+    Callback=function(v) diamondEnabled=v if not v then diamondCharging=false diamondChargeStart=0 end end })
+GlitchDia:Slider({ Name="Puissance", Flag="DiaPower", Min=100, Max=5000, Default=400, Suffix=" force",
+    Callback=function(v) diamondPower=v end })
+GlitchDia:Slider({ Name="Durée", Flag="DiaDur", Min=0.1, Max=2, Default=0.9, Decimals=2, Suffix="s",
+    Callback=function(v) diamondDuration=v end })
+GlitchDia:Slider({ Name="Charge Min", Flag="DiaCharge", Min=0.1, Max=5, Default=1, Decimals=1, Suffix="s",
+    Callback=function(v) diamondRequiredCharge=v end })
+
+-- ========== VISUAL ==========
+local ESPPlayers = PageVisual:Section({ Name = "ESP Players", Side = 1, Icon = "eye" })
+ESPPlayers:Toggle({ Name="ESP Players", Flag="ESPPlayers", Default=false,
+    Callback=function(v) ESPEnabled=v if ESPEnabled or ESPNPCEnabled then startESP() else stopESP() end end })
+ESPPlayers:Divider()
+ESPPlayers:Toggle({ Name="Box", Flag="ESPBox", Default=true, Callback=function(v) ESPBox=v end })
+ESPPlayers:Toggle({ Name="Corner Box", Flag="ESPCorner", Default=false, Callback=function(v) ESPCornerBox=v end })
+ESPPlayers:Toggle({ Name="Filled Box", Flag="ESPFilled", Default=false, Callback=function(v) ESPFilledBox=v end })
+ESPPlayers:Toggle({ Name="Lines", Flag="ESPLines", Default=true, Callback=function(v) ESPLines=v end })
+ESPPlayers:Divider()
+ESPPlayers:Toggle({ Name="Name", Flag="ESPName", Default=true, Callback=function(v) ESPName=v end })
+ESPPlayers:Toggle({ Name="Distance", Flag="ESPDist", Default=true, Callback=function(v) ESPDistance=v end })
+ESPPlayers:Toggle({ Name="Team", Flag="ESPTeam", Default=false, Callback=function(v) ESPTeam=v end })
+ESPPlayers:Toggle({ Name="Bounty", Flag="ESPBounty", Default=false, Callback=function(v) ESPBounty=v end })
+ESPPlayers:Toggle({ Name="Weapon", Flag="ESPWeapon", Default=false, Callback=function(v) ESPWeapon=v end })
+ESPPlayers:Divider()
+ESPPlayers:Toggle({ Name="Health Bar", Flag="ESPHpBar", Default=true, Callback=function(v) ESPHealthBar=v end })
+ESPPlayers:Toggle({ Name="Health Number", Flag="ESPHpNum", Default=false, Callback=function(v) ESPHealthNum=v end })
+ESPPlayers:Divider()
+ESPPlayers:Toggle({ Name="Skeleton", Flag="ESPSkel", Default=false, Callback=function(v) ESPSkeleton=v end })
+ESPPlayers:Toggle({ Name="Head Dot", Flag="ESPHead", Default=false, Callback=function(v) ESPHeadDot=v end })
+ESPPlayers:Toggle({ Name="Off-Screen Arrows", Flag="ESPArrow", Default=false, Callback=function(v) ESPOffScreen=v end })
+ESPPlayers:Toggle({ Name="Chams", Flag="ESPChams", Default=false, Callback=function(v) ESPChams=v end })
+
+local ESPNPCs = PageVisual:Section({ Name = "ESP NPC", Side = 2, Icon = "eye" })
+ESPNPCs:Toggle({ Name="ESP NPCs", Flag="ESPNPC", Default=false,
+    Callback=function(v) ESPNPCEnabled=v if ESPEnabled or ESPNPCEnabled then startESP() else stopESP() end end })
+ESPNPCs:Divider()
+ESPNPCs:Toggle({ Name="Box", Flag="ESPNPCBox", Default=true, Callback=function(v) ESPNPCBox_v=v end })
+ESPNPCs:Toggle({ Name="Name", Flag="ESPNPCName", Default=true, Callback=function(v) ESPNPCName_v=v end })
+ESPNPCs:Toggle({ Name="Distance", Flag="ESPNPCDist", Default=true, Callback=function(v) ESPNPCDist_v=v end })
+ESPNPCs:Toggle({ Name="Health Bar", Flag="ESPNPCHp", Default=true, Callback=function(v) ESPNPCHp_v=v end })
+ESPNPCs:Toggle({ Name="Chams", Flag="ESPNPCChams", Default=false, Callback=function(v) ESPNPCChams_v=v end })
+
+-- Remove Lava (World)
+local WorldBox = PageVisual:Section({ Name = "World", Side = 1 })
+WorldBox:Toggle({ Name="Remove Lava", Flag="NoLava", Default=false,
+    Callback=function(v)
+        for _, o in workspace:GetDescendants() do
+            if o.Name:lower():find("lava") then pcall(function() o.CanTouch = not v end) end
         end
-    end,
+    end })
+
+-- ========== SETTINGS ==========
+Library:CreateSettingsPage(Window, KeybindList)
+
+-- INIT
+Window:Init()
+
+Library:Notification({
+    Title = "Nameless Client",
+    Description = "All features loaded — Silent Aim (Z/X/C/V/F only)",
+    Duration = 3,
+    Icon = "73789337996373"
 })
 
--- =====================================================================
--- TAB PLAYER
--- =====================================================================
-local FakeItemsBox  = Tabs.Player:AddLeftGroupbox("Fake Items")
-local PlayerMoveBox = Tabs.Player:AddRightGroupbox("Movement")
-local PlayerMiscBox = Tabs.Player:AddLeftGroupbox("Misc")
-
-FakeItemsBox:AddDropdown("KorbloxVersion", {
-    Values = {"V1","V2"}, Default = 1, Text = "Korblox Version",
-    Callback = function(v) fakeKorbloxVersion = v if fakeKorbloxEnabled then removeFakeKorblox() applyFakeKorblox() end end,
-})
-FakeItemsBox:AddToggle("FakeKorblox", {
-    Text = "Fake Korblox", Default = false,
-    Callback = function(v) fakeKorbloxEnabled = v if v then applyFakeKorblox() else removeFakeKorblox() end end,
-})
-FakeItemsBox:AddDivider()
-FakeItemsBox:AddDropdown("HeadlessVersion", {
-    Values = {"V1","V2"}, Default = 1, Text = "Headless Version",
-    Callback = function(v) fakeHeadlessVersion = v if fakeHeadlessEnabled then removeFakeHeadless() applyFakeHeadless() end end,
-})
-FakeItemsBox:AddToggle("FakeHeadless", {
-    Text = "Fake Headless", Default = false,
-    Callback = function(v) fakeHeadlessEnabled = v if v then applyFakeHeadless() else removeFakeHeadless() end end,
-})
-FakeItemsBox:AddDivider()
-FakeItemsBox:AddToggle("Stretched", {
-    Text = "Stretched Screen", Default = false,
-    Callback = function(v) stretchedEnabled = v if v then applyStretched() else removeStretched() end end,
-})
-FakeItemsBox:AddSlider("StretchAmount", {
-    Text = "Stretch Amount", Default = 65, Min = 50, Max = 100, Rounding = 0, Suffix = "%",
-    Callback = function(v) stretchedAmount = v/100 if stretchedEnabled then applyStretched() end end,
-})
-
-PlayerMoveBox:AddToggle("JumpBoost", {
-    Text = "Jump Boost", Default = false,
-    Callback = function(v) jumpEnabled = v if v then applyJump() else resetJump() end end,
-})
-PlayerMoveBox:AddSlider("JumpPower", {
-    Text = "Jump Power", Default = 100, Min = 50, Max = 500, Rounding = 0,
-    Callback = function(v) jumpPower = v if jumpEnabled then applyJump() end end,
-})
-PlayerMoveBox:AddDivider()
-PlayerMoveBox:AddToggle("SpeedHack", {
-    Text = "Speed Hack", Default = false,
-    Callback = function(v) speedEnabled = v if v then applySpeed() else resetSpeed() end end,
-})
-PlayerMoveBox:AddSlider("SpeedValue", {
-    Text = "Walk Speed", Default = 50, Min = 16, Max = 50000, Rounding = 0,
-    Callback = function(v) speedValue = v if speedEnabled then applySpeed() end end,
-})
-PlayerMoveBox:AddDivider()
-PlayerMoveBox:AddToggle("FlyNormal", {
-    Text = "Fly", Default = false,
-    Callback = function(v) flyEnabled = v if v then startFly() else stopFly() end end,
-})
-PlayerMoveBox:AddSlider("FlySpeed", {
-    Text = "Fly Speed", Default = 50, Min = 10, Max = 300, Rounding = 0,
-    Callback = function(v) flySpeed = v if flyMiniGui then
-        local panel = flyMiniGui:FindFirstChildOfClass("Frame")
-        if panel then
-            local lbl = panel:FindFirstChildOfClass("TextLabel")
-            if lbl then lbl.Text = "Speed: " .. flySpeed end
-        end
-    end,
-})
-PlayerMoveBox:AddDivider()
-PlayerMoveBox:AddToggle("FlySpin", {
-    Text = "Fly Spin", Default = false,
-    Callback = function(v) flySpinEnabled = v if v then startFlySpin() else stopFlySpin() end end,
-})
-PlayerMoveBox:AddSlider("FlySpinSpeed", {
-    Text = "Spin Speed", Default = 50, Min = 5, Max = 200, Rounding = 0,
-    Callback = function(v) flySpinSpeed = v end,
-})
-
-PlayerMiscBox:AddToggle("AutoKen", {
-    Text = "Auto Ken", Default = false,
-    Callback = function(v) AutoKen = v if v then startAutoKenLoop() end end,
-})
-
--- =====================================================================
--- TAB GLITCH
--- =====================================================================
-local SanguineBox = Tabs.Glitch:AddLeftGroupbox("Sanguine Glitch")
-local DiamondBox  = Tabs.Glitch:AddRightGroupbox("Diamond Glitch")
-
-SanguineBox:AddToggle("SanguineGlitch", {
-    Text = "Sanguine Z Boost", Default = false,
-    Callback = function(v) multiEnabled = v if not v then multiCharging = false multiChargeStart = 0 end end,
-})
-SanguineBox:AddSlider("SanguinePower", {
-    Text = "Puissance", Default = 1000, Min = 100, Max = 5000, Rounding = 0, Suffix = " force",
-    Callback = function(v) multiPower = v end,
-})
-SanguineBox:AddSlider("SanguineDuration", {
-    Text = "Durée", Default = 60, Min = 10, Max = 200, Rounding = 0, Suffix = " cs",
-    Callback = function(v) multiDuration = v/100 end,
-})
-
-DiamondBox:AddToggle("DiamondGlitch", {
-    Text = "Diamond Glitch", Default = false,
-    Callback = function(v) diamondEnabled = v if not v then diamondCharging = false diamondChargeStart = 0 end end,
-})
-DiamondBox:AddSlider("DiamondPower", {
-    Text = "Puissance", Default = 400, Min = 100, Max = 5000, Rounding = 0, Suffix = " force",
-    Callback = function(v) diamondPower = v end,
-})
-DiamondBox:AddSlider("DiamondDuration", {
-    Text = "Durée", Default = 90, Min = 10, Max = 200, Rounding = 0, Suffix = " cs",
-    Callback = function(v) diamondDuration = v/100 end,
-})
-DiamondBox:AddSlider("DiamondCharge", {
-    Text = "Charge Min", Default = 10, Min = 1, Max = 50, Rounding = 0, Suffix = "00ms",
-    Callback = function(v) diamondRequiredCharge = v/10 end,
-})
-
--- =====================================================================
--- TAB VISUAL
--- =====================================================================
-local ESPPlayersBox = Tabs.Visual:AddLeftGroupbox("ESP Players")
-local ESPNPCBox     = Tabs.Visual:AddRightGroupbox("ESP NPC")
-
-ESPPlayersBox:AddToggle("ESPPlayers", {
-    Text = "ESP Players", Default = false,
-    Callback = function(v) ESPEnabled = v
-        if ESPEnabled or ESPNPCEnabled then startESP() else stopESP() end
-    end,
-})
-ESPPlayersBox:AddDivider()
-ESPPlayersBox:AddToggle("ESPBox",       { Text = "Box",              Default = true,  Callback = function(v) ESPBox       = v end })
-ESPPlayersBox:AddToggle("ESPCornerBox", { Text = "Corner Box",       Default = false, Callback = function(v) ESPCornerBox = v end })
-ESPPlayersBox:AddToggle("ESPFilledBox", { Text = "Filled Box",       Default = false, Callback = function(v) ESPFilledBox = v end })
-ESPPlayersBox:AddToggle("ESPLines",     { Text = "Lines (haut milieu)", Default = true, Callback = function(v) ESPLines   = v end })
-ESPPlayersBox:AddDivider()
-ESPPlayersBox:AddToggle("ESPName",      { Text = "Name",             Default = true,  Callback = function(v) ESPName      = v end })
-ESPPlayersBox:AddToggle("ESPDistance",  { Text = "Distance",         Default = true,  Callback = function(v) ESPDistance  = v end })
-ESPPlayersBox:AddToggle("ESPTeam",      { Text = "Team",             Default = false, Callback = function(v) ESPTeam      = v end })
-ESPPlayersBox:AddToggle("ESPBounty",    { Text = "Bounty",           Default = false, Callback = function(v) ESPBounty    = v end })
-ESPPlayersBox:AddToggle("ESPWeapon",    { Text = "Weapon",           Default = false, Callback = function(v) ESPWeapon    = v end })
-ESPPlayersBox:AddDivider()
-ESPPlayersBox:AddToggle("ESPHealthBar", { Text = "Health Bar",       Default = true,  Callback = function(v) ESPHealthBar = v end })
-ESPPlayersBox:AddToggle("ESPHealthNum", { Text = "Health Number",    Default = false, Callback = function(v) ESPHealthNum = v end })
-ESPPlayersBox:AddDivider()
-ESPPlayersBox:AddToggle("ESPSkeleton",  { Text = "Skeleton",         Default = false, Callback = function(v) ESPSkeleton  = v end })
-ESPPlayersBox:AddToggle("ESPHeadDot",   { Text = "Head Dot",         Default = false, Callback = function(v) ESPHeadDot   = v end })
-ESPPlayersBox:AddToggle("ESPOffScreen", { Text = "Off-Screen Arrows",Default = false, Callback = function(v) ESPOffScreen = v end })
-ESPPlayersBox:AddToggle("ESPChams",     { Text = "Chams",            Default = false, Callback = function(v) ESPChams     = v end })
-
-ESPNPCBox:AddToggle("ESPNPCs", {
-    Text = "ESP NPCs", Default = false,
-    Callback = function(v) ESPNPCEnabled = v
-        if ESPEnabled or ESPNPCEnabled then startESP() else stopESP() end
-    end,
-})
-ESPNPCBox:AddDivider()
-ESPNPCBox:AddToggle("ESPNPCBoxFlag",  { Text = "Box",        Default = true,  Callback = function(v) ESPNPCBox_v   = v end })
-ESPNPCBox:AddToggle("ESPNPCNameFlag", { Text = "Name",       Default = true,  Callback = function(v) ESPNPCName_v  = v end })
-ESPNPCBox:AddToggle("ESPNPCDistFlag", { Text = "Distance",   Default = true,  Callback = function(v) ESPNPCDist_v  = v end })
-ESPNPCBox:AddToggle("ESPNPCHpFlag",   { Text = "Health Bar", Default = true,  Callback = function(v) ESPNPCHp_v    = v end })
-ESPNPCBox:AddToggle("ESPNPCChamsF",   { Text = "Chams",      Default = false, Callback = function(v) ESPNPCChams_v = v end })
-
--- =====================================================================
--- TAB FONT (vide)
--- =====================================================================
-
--- =====================================================================
--- TAB SETTINGS
--- =====================================================================
-local MenuGroup = Tabs.Settings:AddLeftGroupbox("Menu")
-
-MenuGroup:AddLabel("Menu bind"):AddKeyPicker("MenuKeybind", {
-    Default = "RightShift", NoUI = true, Text = "Menu keybind",
-})
-Library.ToggleKeybind = Options.MenuKeybind
-
-ThemeManager:SetLibrary(Library)
-SaveManager:SetLibrary(Library)
-SaveManager:IgnoreThemeSettings()
-SaveManager:SetIgnoreIndexes({ "MenuKeybind" })
-ThemeManager:SetFolder("GotchaExe")
-SaveManager:SetFolder("GotchaExe")
-
-ThemeManager:ApplyToGroupbox(MenuGroup)
-SaveManager:BuildConfigSection(Tabs.Settings)
-SaveManager:LoadAutoloadConfig()
-
-Library:Notify({
-    Title = "gotcha.exe",
-    Description = "Silent Aim (Z/X/C/V/F only) chargé ! By HimselfZen",
-    Time = 5,
-})
-
-print("✅ gotcha.exe | Obsidian + Silent Aim (Z/X/C/V/F only) | By HimselfZen")
+print("✅ Nameless Client | All-in-One | By HimselfZen")
