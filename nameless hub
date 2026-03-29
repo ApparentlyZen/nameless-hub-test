@@ -1,15 +1,15 @@
--- =====================================================================
--- NAMELESS.CLIENT | Obsidian UI + Nameless SA Module
--- By HimselfZen
--- =====================================================================
+local Library = loadstring(game:HttpGet(
+    "https://raw.githubusercontent.com/ApparentlyZen/nameless_lib.lua/refs/heads/main/nameless_lib.lua"
+))()
 
-local repo = "https://raw.githubusercontent.com/deividcomsono/Obsidian/main/"
-local Library      = loadstring(game:HttpGet(repo .. "Library.lua"))()
-local ThemeManager = loadstring(game:HttpGet(repo .. "addons/ThemeManager.lua"))()
-local SaveManager  = loadstring(game:HttpGet(repo .. "addons/SaveManager.lua"))()
-
-local Options = Library.Options
-local Toggles = Library.Toggles
+Library.Folders = {
+    Directory = "Nameless Client",
+    Configs   = "Nameless Client/Configs",
+    Assets    = "Nameless Client/Assets"
+}
+for _, f in { Library.Folders.Directory, Library.Folders.Configs, Library.Folders.Assets } do
+    if not isfolder(f) then makefolder(f) end
+end
 
 -- =====================================================================
 -- SERVICES
@@ -431,9 +431,9 @@ local SA = (function()
             if drag and (i.UserInputType == Enum.UserInputType.Touch or i.UserInputType == Enum.UserInputType.MouseMovement) then
                 local d = i.Position - ds
                 btn.Position = UDim2.new(0,
-                    math.clamp(sp.X.Offset+d.X, 0, cam.ViewportSize.X-btn.AbsoluteSize.X),
+                    math.clamp(sp.X.Offset+d.X, 0, camera.ViewportSize.X-btn.AbsoluteSize.X),
                     0,
-                    math.clamp(sp.Y.Offset+d.Y, 0, cam.ViewportSize.Y-btn.AbsoluteSize.Y))
+                    math.clamp(sp.Y.Offset+d.Y, 0, camera.ViewportSize.Y-btn.AbsoluteSize.Y))
             end
         end)
         refresh(stateRef.value) return sg2
@@ -526,6 +526,289 @@ local SA = (function()
         elseif MiniNCreated and MiniNGui then MiniNGui.Enabled = state end
     end
 
+    return M
+end)()
+
+-- =====================================================================
+-- KILL AURA V7 MODULE
+-- =====================================================================
+local KillAura = (function()
+    local M = {}
+    
+    local ScreenGui = nil
+    local Main = nil
+    local settings = { 
+        radius = 10, 
+        strafeSpeed = 0.45, 
+        angle = 0, 
+        selectedPlayer = "Closest",
+        auraMin = 0,
+        auraMax = 1000,
+        spinSpeed = 500
+    }
+    
+    local isActive = false
+    
+    local function isAlly(p)
+        local lp = Players.LocalPlayer
+        local myGui = lp:FindFirstChild("PlayerGui")
+        local allies = myGui and myGui:FindFirstChild("Main") and myGui.Main:FindFirstChild("Allies")
+        if allies and allies:FindFirstChild("AlliesList") and allies.AlliesList:FindFirstChild(p.Name) then return true end
+        return p.Team ~= nil and p.Team == lp.Team
+    end
+    
+    local function Attack(target)
+        local net = RS.Modules.Net
+        local v106 = tostring(Players.LocalPlayer.UserId):sub(2,4)..tostring(coroutine.running()):sub(11,15)
+        net["RE/RegisterAttack"]:FireServer(0)
+        net["RE/RegisterHit"]:FireServer(target:FindFirstChild("Head") or target:FindFirstChild("HumanoidRootPart"), {}, v106)
+    end
+    
+    local function AddTgl(parent, name, color, callback)
+        local b = Instance.new("TextButton", parent); b.Size = UDim2.new(1, 0, 0, 30); b.BackgroundColor3 = Color3.fromRGB(30, 30, 35); b.Text = name.." [OFF]"; b.TextColor3 = Color3.fromRGB(180, 180, 180); b.Font = Enum.Font.GothamSemibold; b.TextSize = 10
+        Instance.new("UICorner", b).CornerRadius = UDim.new(0, 6)
+        local act = false; b.MouseButton1Click:Connect(function() act = not act; b.Text = name..(act and " [ON]" or " [OFF]"); b.BackgroundColor3 = act and color or Color3.fromRGB(30, 30, 35); b.TextColor3 = act and Color3.new(1,1,1) or Color3.fromRGB(180,180,180); callback(act) end)
+    end
+    
+    local function AddSlider(parent, name, min, max, def, callback)
+        local f = Instance.new("Frame", parent); f.Size = UDim2.new(1, 0, 0, 38); f.BackgroundTransparency = 1
+        local l = Instance.new("TextLabel", f); l.Size = UDim2.new(1,0,0,15); l.Text = name.." : "..def; l.TextColor3 = Color3.new(0.7,0.7,0.7); l.Font = Enum.Font.Gotham; l.TextSize = 10; l.BackgroundTransparency = 1
+        local b = Instance.new("Frame", f); b.Size = UDim2.new(1,0,0,4); b.Position = UDim2.new(0,0,0.7,0); b.BackgroundColor3 = Color3.fromRGB(40,40,45)
+        local fi = Instance.new("Frame", b); fi.Size = UDim2.new((def-min)/(max-min), 0, 1, 0); fi.BackgroundColor3 = Color3.fromRGB(100, 100, 255)
+        f.InputBegan:Connect(function(i) if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then local m = UserInputService.InputChanged:Connect(function(i) if i.UserInputType == Enum.UserInputType.MouseMovement or i.UserInputType == Enum.UserInputType.Touch then local p = math.clamp((i.Position.X - b.AbsolutePosition.X) / b.AbsoluteSize.X, 0, 1); fi.Size = UDim2.new(p,0,1,0); local v = math.floor(min + (max - min) * p); l.Text = name.." : "..v; callback(v) end end) i.Changed:Connect(function() if i.UserInputState == Enum.UserInputState.End then m:Disconnect() end end) end end)
+    end
+    
+    function M:CreateUI()
+        if ScreenGui then return end
+        
+        ScreenGui = Instance.new("ScreenGui")
+        ScreenGui.Name = "Nameless client Pvp Exploit"
+        ScreenGui.Parent = game:GetService("CoreGui")
+        
+        Main = Instance.new("Frame", ScreenGui)
+        Main.Size = UDim2.new(0, 380, 0, 300)
+        Main.Position = UDim2.new(0.5, -190, 0.3, 0)
+        Main.BackgroundColor3 = Color3.fromRGB(12, 12, 18)
+        Main.BorderSizePixel = 0
+        Main.Active = true
+        Main.Visible = false
+        Instance.new("UICorner", Main).CornerRadius = UDim.new(0, 10)
+        
+        local TitleBar = Instance.new("Frame", Main)
+        TitleBar.Size = UDim2.new(1, 0, 0, 35)
+        TitleBar.BackgroundColor3 = Color3.fromRGB(22, 22, 32)
+        TitleBar.BorderSizePixel = 0
+        local tc = Instance.new("UICorner", TitleBar); tc.CornerRadius = UDim.new(0, 10)
+        
+        local TitleLabel = Instance.new("TextLabel", TitleBar)
+        TitleLabel.Size = UDim2.new(1, -40, 1, 0)
+        TitleLabel.Position = UDim2.new(0, 10, 0, 0)
+        TitleLabel.Text = "SAPI HUB PREMIUM V7"
+        TitleLabel.TextColor3 = Color3.new(1,1,1)
+        TitleLabel.Font = Enum.Font.GothamBold
+        TitleLabel.TextSize = 14
+        TitleLabel.TextXAlignment = Enum.TextXAlignment.Left
+        TitleLabel.BackgroundTransparency = 1
+        
+        local MinBtn = Instance.new("TextButton", TitleBar)
+        MinBtn.Size = UDim2.new(0, 30, 0, 30)
+        MinBtn.Position = UDim2.new(1, -35, 0, 2)
+        MinBtn.Text = "-"
+        MinBtn.TextColor3 = Color3.new(1,1,1)
+        MinBtn.BackgroundColor3 = Color3.fromRGB(40, 40, 60)
+        MinBtn.Font = Enum.Font.GothamBold
+        MinBtn.TextSize = 18
+        Instance.new("UICorner", MinBtn)
+        
+        local ContentFrame = Instance.new("Frame", Main)
+        ContentFrame.Size = UDim2.new(1, 0, 1, -35)
+        ContentFrame.Position = UDim2.new(0, 0, 0, 35)
+        ContentFrame.BackgroundTransparency = 1
+        ContentFrame.ClipsDescendants = true
+        
+        local isMinimized = false
+        MinBtn.MouseButton1Click:Connect(function()
+            isMinimized = not isMinimized
+            ContentFrame.Visible = not isMinimized
+            Main.Size = isMinimized and UDim2.new(0, 380, 0, 35) or UDim2.new(0, 380, 0, 300)
+            MinBtn.Text = isMinimized and "+" or "-"
+        end)
+        
+        local dragging, dragStart, startPos
+        TitleBar.InputBegan:Connect(function(i) if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then dragging = true; dragStart = i.Position; startPos = Main.Position end end)
+        UserInputService.InputChanged:Connect(function(i) if dragging and (i.UserInputType == Enum.UserInputType.MouseMovement or i.UserInputType == Enum.UserInputType.Touch) then local d = i.Position - dragStart; Main.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + d.X, startPos.Y.Scale, startPos.Y.Offset + d.Y) end end)
+        UserInputService.InputEnded:Connect(function(i) if i.UserInputState == Enum.UserInputState.End then dragging = false end end)
+        
+        local LeftContent = Instance.new("ScrollingFrame", ContentFrame)
+        LeftContent.Size = UDim2.new(0.5, -10, 1, -10); LeftContent.Position = UDim2.new(0, 5, 0, 5)
+        LeftContent.BackgroundTransparency = 1; LeftContent.CanvasSize = UDim2.new(0,0,3,0); LeftContent.ScrollBarThickness = 0
+        Instance.new("UIListLayout", LeftContent).Padding = UDim.new(0, 5)
+        
+        local RightContent = Instance.new("ScrollingFrame", ContentFrame)
+        RightContent.Size = UDim2.new(0.5, -10, 1, -10); RightContent.Position = UDim2.new(0.5, 5, 0, 5)
+        RightContent.BackgroundTransparency = 1; RightContent.CanvasSize = UDim2.new(0,0,3,0); RightContent.ScrollBarThickness = 0
+        Instance.new("UIListLayout", RightContent).Padding = UDim.new(0, 5)
+        
+        local Sep = Instance.new("Frame", ContentFrame)
+        Sep.Size = UDim2.new(0, 1, 1, -20); Sep.Position = UDim2.new(0.5, 0, 0, 10); Sep.BackgroundColor3 = Color3.fromRGB(40, 40, 50); Sep.BorderSizePixel = 0
+        
+        local TargetZone = Instance.new("Frame", LeftContent); TargetZone.Size = UDim2.new(1, 0, 0, 30); TargetZone.BackgroundTransparency = 1
+        local DBtn = Instance.new("TextButton", TargetZone); DBtn.Size = UDim2.new(0.75, -5, 1, 0); DBtn.Text = "Cible: Closest"; DBtn.BackgroundColor3 = Color3.fromRGB(40,40,50); DBtn.TextColor3 = Color3.new(1,1,1); DBtn.Font = Enum.Font.GothamBold; DBtn.TextSize = 9; Instance.new("UICorner", DBtn)
+        local RefreshBtn = Instance.new("TextButton", TargetZone); RefreshBtn.Size = UDim2.new(0.25, 0, 1, 0); RefreshBtn.Position = UDim2.new(0.75, 0, 0, 0); RefreshBtn.Text = "Refresh"; RefreshBtn.BackgroundColor3 = Color3.fromRGB(50,150,50); RefreshBtn.TextColor3 = Color3.new(1,1,1); RefreshBtn.Font = Enum.Font.GothamBold; RefreshBtn.TextSize = 9; Instance.new("UICorner", RefreshBtn)
+        
+        local DScroll = Instance.new("ScrollingFrame", LeftContent); DScroll.Size = UDim2.new(1,0,0,80); DScroll.Visible = false; DScroll.BackgroundColor3 = Color3.fromRGB(20,20,25); Instance.new("UIListLayout", DScroll)
+        DBtn.MouseButton1Click:Connect(function() DScroll.Visible = not DScroll.Visible end)
+        
+        local function UpdatePlayerList()
+            for _,v in pairs(DScroll:GetChildren()) do if v:IsA("TextButton") then v:Destroy() end end
+            local function createBtn(n, d)
+                local b = Instance.new("TextButton", DScroll); b.Size = UDim2.new(1,0,0,22); b.Text = d; b.BackgroundColor3 = Color3.fromRGB(30,30,40); b.TextColor3 = Color3.new(1,1,1); b.TextSize = 9
+                b.MouseButton1Click:Connect(function() settings.selectedPlayer = n; DBtn.Text = "Cible: "..d; DScroll.Visible = false end)
+            end
+            createBtn("Closest", "Closest")
+            for _,p in pairs(Players:GetPlayers()) do
+                if p ~= Players.LocalPlayer and not isAlly(p) then createBtn(p.Name, p.DisplayName) end
+            end
+        end
+        UpdatePlayerList()
+        RefreshBtn.MouseButton1Click:Connect(UpdatePlayerList)
+        
+        AddTgl(LeftContent, "Kill Aura NPC", Color3.fromRGB(180, 45, 45), function(v) _G.KA_NPC = v; task.spawn(function() while _G.KA_NPC do local hrp = Players.LocalPlayer.Character and Players.LocalPlayer.Character:FindFirstChild("HumanoidRootPart") if hrp then for _,n in pairs(workspace.Enemies:GetChildren()) do if n:FindFirstChild("HumanoidRootPart") then local d = (n.HumanoidRootPart.Position - hrp.Position).Magnitude; if d >= settings.auraMin and d <= settings.auraMax then Attack(n) end end end end task.wait(0.01) end end) end)
+        AddTgl(LeftContent, "Kill Aura Player", Color3.fromRGB(45, 45, 180), function(v) _G.KA_PLR = v; task.spawn(function() while _G.KA_PLR do local hrp = Players.LocalPlayer.Character and Players.LocalPlayer.Character:FindFirstChild("HumanoidRootPart") if hrp then for _,p in pairs(Players:GetPlayers()) do if p ~= Players.LocalPlayer and not isAlly(p) and p.Character and p.Character:FindFirstChild("HumanoidRootPart") then local d = (p.Character.HumanoidRootPart.Position - hrp.Position).Magnitude; if d >= settings.auraMin and d <= settings.auraMax then Attack(p.Character) end end end end task.wait(0.01) end end) end)
+        
+        AddTgl(LeftContent, "Strafe NPC", Color3.fromRGB(180, 45, 45), function(v) _G.S_NPC = v; task.spawn(function() while _G.S_NPC do local hrp = Players.LocalPlayer.Character and Players.LocalPlayer.Character:FindFirstChild("HumanoidRootPart"); local t = nil; local dmin = 1000; if hrp then for _,n in pairs(workspace.Enemies:GetChildren()) do if n:FindFirstChild("HumanoidRootPart") and n.Humanoid.Health > 0 then local d = (n.HumanoidRootPart.Position-hrp.Position).Magnitude; if d < dmin then dmin = d; t = n.HumanoidRootPart end end end if t then settings.angle = settings.angle + (settings.strafeSpeed/10); hrp.CFrame = CFrame.new(t.Position + Vector3.new(math.cos(settings.angle)*settings.radius, 4, math.sin(settings.angle)*settings.radius), t.Position); Attack(t.Parent) end end task.wait() end end) end)
+        AddTgl(LeftContent, "Strafe Player", Color3.fromRGB(45, 45, 180), function(v) _G.S_PLR = v; task.spawn(function() while _G.S_PLR do local hrp = Players.LocalPlayer.Character and Players.LocalPlayer.Character:FindFirstChild("HumanoidRootPart"); local t = nil; if hrp then if settings.selectedPlayer == "Closest" then local dmin = 1000; for _,p in pairs(Players:GetPlayers()) do if p ~= Players.LocalPlayer and not isAlly(p) and p.Character and p.Character.Humanoid.Health > 0 then local d = (p.Character.HumanoidRootPart.Position-hrp.Position).Magnitude; if d < dmin then dmin = d; t = p.Character.HumanoidRootPart end end end else local p = Players:FindFirstChild(settings.selectedPlayer); if p and p.Character and p.Character.Humanoid.Health > 0 then t = p.Character.HumanoidRootPart end end if t then settings.angle = settings.angle + (settings.strafeSpeed/10); hrp.CFrame = CFrame.new(t.Position + Vector3.new(math.cos(settings.angle)*settings.radius, 4, math.sin(settings.angle)*settings.radius), t.Position); Attack(t.Parent) end end task.wait() end end) end)
+        
+        AddSlider(RightContent, "Distance Strafe", 1, 4000, 10, function(v) settings.radius = v end)
+        AddSlider(RightContent, "Vitesse Strafe", 1, 2000, 45, function(v) settings.strafeSpeed = v / 100 end)
+        
+        AddSlider(RightContent, "Aura Min Range", 0, 500, 0, function(v) settings.auraMin = v end)
+        AddSlider(RightContent, "Aura Max Range", 10, 40000, 1000, function(v) settings.auraMax = v end)
+        
+        AddSlider(RightContent, "Vitesse Spin", 1, 15000, 500, function(v) settings.spinSpeed = v end)
+        
+        AddTgl(RightContent, "Spin Bot", Color3.fromRGB(150, 45, 180), function(v) 
+            _G.SpinBot = v; 
+            task.spawn(function() 
+                while _G.SpinBot do 
+                    local hrp = Players.LocalPlayer.Character and Players.LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+                    if hrp then 
+                        hrp.CFrame = hrp.CFrame * CFrame.Angles(0, math.rad(settings.spinSpeed), 0)
+                    end 
+                    task.wait() 
+                end 
+            end) 
+        end)
+    end
+    
+    function M:Toggle(state)
+        if not ScreenGui then M:CreateUI() end
+        isActive = state
+        Main.Visible = state
+        
+        if not state then
+            _G.KA_NPC = false
+            _G.KA_PLR = false
+            _G.S_NPC = false
+            _G.S_PLR = false
+            _G.SpinBot = false
+        end
+    end
+    
+    return M
+end)()
+
+-- =====================================================================
+-- FLY EXPLOIT V3 MODULE
+-- =====================================================================
+local FlyExploit = (function()
+    local M = {}
+    
+    local lp = Players.LocalPlayer
+    local runService = RunService
+    local uis = UserInputService
+    local ts = game:GetService("TweenService")
+    
+    local settings = {
+        flyActive = false,
+        noclipActive = false,
+        mode = "CFrame",
+        speed = 50,
+        incore = nil,
+        nocore = nil
+    }
+    
+    local function StopFly()
+        settings.flyActive = false
+        if settings.incore then settings.incore:Disconnect() end
+        if lp.Character and lp.Character:FindFirstChild("Humanoid") then
+            lp.Character.Humanoid.PlatformStand = false
+            lp.Character.Humanoid:ChangeState(Enum.HumanoidStateType.GettingUp)
+        end
+    end
+    
+    local function StartFly()
+        StopFly(); settings.flyActive = true
+        local char = lp.Character; if not char then return end
+        local hrp = char:FindFirstChild("HumanoidRootPart"); local hum = char:FindFirstChild("Humanoid")
+        
+        settings.incore = runService.Stepped:Connect(function()
+            if not settings.flyActive or not hrp.Parent then StopFly() return end
+            local moveDir = hum.MoveDirection
+            
+            if settings.mode == "CFrame" then
+                hum.PlatformStand = true
+                hrp.CFrame = hrp.CFrame + (moveDir * settings.speed/10)
+                hrp.Velocity = Vector3.zero
+            elseif settings.mode == "Velocity" then
+                hrp.Velocity = (moveDir * settings.speed) + Vector3.new(0, 2, 0)
+            elseif settings.mode == "Swim" then
+                hum:ChangeState(Enum.HumanoidStateType.Swimming)
+                hrp.Velocity = moveDir * settings.speed
+            elseif settings.mode == "TP-Fast" then
+                if moveDir.Magnitude > 0 then hrp.CFrame = hrp.CFrame * CFrame.new(0, 0, -settings.speed/5) end
+            elseif settings.mode == "Float" then
+                hrp.Velocity = Vector3.new(moveDir.X * settings.speed, 1.5, moveDir.Z * settings.speed)
+            elseif settings.mode == "Tween" then
+                if moveDir.Magnitude > 0 then ts:Create(hrp, TweenInfo.new(0.1, Enum.EasingStyle.Linear), {CFrame = hrp.CFrame + (moveDir * settings.speed/5)}):Play() end
+            end
+            
+            if uis:IsKeyDown(Enum.KeyCode.Space) then hrp.CFrame = hrp.CFrame * CFrame.new(0, settings.speed/15, 0) end
+            if uis:IsKeyDown(Enum.KeyCode.LeftShift) then hrp.CFrame = hrp.CFrame * CFrame.new(0, -settings.speed/15, 0) end
+        end)
+    end
+    
+    local function ToggleNoClip(state)
+        settings.noclipActive = state
+        if settings.nocore then settings.nocore:Disconnect() end
+        if state then
+            settings.nocore = runService.Stepped:Connect(function()
+                if not settings.noclipActive then settings.nocore:Disconnect() return end
+                if lp.Character then
+                    for _, part in pairs(lp.Character:GetDescendants()) do
+                        if part:IsA("BasePart") then part.CanCollide = false end
+                    end
+                end
+            end)
+        end
+    end
+    
+    function M:SetMode(mode)
+        settings.mode = mode
+    end
+    
+    function M:SetSpeed(speed)
+        settings.speed = speed
+    end
+    
+    function M:ToggleFly(state)
+        if state then StartFly() else StopFly() end
+    end
+    
+    function M:ToggleNoClip(state)
+        ToggleNoClip(state)
+    end
+    
     return M
 end)()
 
@@ -860,7 +1143,7 @@ local function stopESP()
 end
 
 -- =====================================================================
--- PLAYER FEATURES — Fake Items, Stretched, Jump, Speed, Fly
+-- PLAYER FEATURES — Fake Items, Stretched, Jump, Speed
 -- =====================================================================
 local Mouse = player:GetMouse()
 
@@ -992,149 +1275,6 @@ local function resetSpeed()
     local char = player.Character if not char then return end
     local hum = char:FindFirstChildOfClass("Humanoid")
     if hum then hum.WalkSpeed = 16 end
-end
-
--- Fly Normal
-local flyEnabled    = false
-local flyConn       = nil
-local flyAtt        = nil
-local flyLV         = nil
-local flySpeed      = 50
-local flyMiniGui    = nil
-local flyMiniActive = false
-local _flyUp        = false
-local _flyDown      = false
-
-local function createFlyMiniToggle()
-    local playerGui = player:WaitForChild("PlayerGui")
-    if playerGui:FindFirstChild("FlyMiniGui") then playerGui.FlyMiniGui:Destroy() end
-    local sg = Instance.new("ScreenGui")
-    sg.Name = "FlyMiniGui" sg.ResetOnSpawn = false sg.Parent = playerGui
-    local panel = Instance.new("Frame", sg)
-    panel.Size = UDim2.new(0, 155, 0, 130)
-    panel.Position = UDim2.new(0, 10, 0.5, -65)
-    panel.BackgroundColor3 = Color3.fromRGB(15, 15, 15) panel.BorderSizePixel = 0
-    Instance.new("UICorner", panel).CornerRadius = UDim.new(0, 14)
-    local panelStroke = Instance.new("UIStroke", panel)
-    panelStroke.Color = Color3.fromRGB(60,60,60) panelStroke.Thickness = 1
-    local btn = Instance.new("TextButton", panel)
-    btn.Size = UDim2.new(1,-10,0,40) btn.Position = UDim2.new(0,5,0,5)
-    btn.Text = "✈  FLY: OFF" btn.TextScaled = true
-    btn.BackgroundColor3 = Color3.fromRGB(35,35,35) btn.TextColor3 = Color3.fromRGB(255,255,255)
-    btn.BorderSizePixel = 0 btn.Font = Enum.Font.GothamBold
-    Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 10)
-    local grad = Instance.new("UIGradient", btn) grad.Rotation = 45
-    local speedLbl = Instance.new("TextLabel", panel)
-    speedLbl.Size = UDim2.new(1,-10,0,20) speedLbl.Position = UDim2.new(0,5,0,50)
-    speedLbl.BackgroundTransparency = 1 speedLbl.Text = "Speed: "..flySpeed
-    speedLbl.TextScaled = true speedLbl.TextColor3 = Color3.fromRGB(160,160,160)
-    speedLbl.Font = Enum.Font.Gotham
-    local sep = Instance.new("Frame", panel)
-    sep.Size = UDim2.new(1,-20,0,1) sep.Position = UDim2.new(0,10,0,75)
-    sep.BackgroundColor3 = Color3.fromRGB(55,55,55) sep.BorderSizePixel = 0
-    local upBtn = Instance.new("TextButton", panel)
-    upBtn.Size = UDim2.new(0,67,0,42) upBtn.Position = UDim2.new(0,5,0,82)
-    upBtn.Text = "⬆  UP" upBtn.TextScaled = true
-    upBtn.BackgroundColor3 = Color3.fromRGB(30,80,200) upBtn.TextColor3 = Color3.fromRGB(255,255,255)
-    upBtn.BorderSizePixel = 0 upBtn.Font = Enum.Font.GothamBold
-    Instance.new("UICorner", upBtn).CornerRadius = UDim.new(0, 10)
-    local downBtn = Instance.new("TextButton", panel)
-    downBtn.Size = UDim2.new(0,67,0,42) downBtn.Position = UDim2.new(0,80,0,82)
-    downBtn.Text = "⬇  DN" downBtn.TextScaled = true
-    downBtn.BackgroundColor3 = Color3.fromRGB(180,50,35) downBtn.TextColor3 = Color3.fromRGB(255,255,255)
-    downBtn.BorderSizePixel = 0 downBtn.Font = Enum.Font.GothamBold
-    Instance.new("UICorner", downBtn).CornerRadius = UDim.new(0, 10)
-    upBtn.InputBegan:Connect(function(i)
-        if i.UserInputType==Enum.UserInputType.Touch or i.UserInputType==Enum.UserInputType.MouseButton1 then _flyUp=true end
-    end)
-    upBtn.InputEnded:Connect(function(i)
-        if i.UserInputType==Enum.UserInputType.Touch or i.UserInputType==Enum.UserInputType.MouseButton1 then _flyUp=false end
-    end)
-    downBtn.InputBegan:Connect(function(i)
-        if i.UserInputType==Enum.UserInputType.Touch or i.UserInputType==Enum.UserInputType.MouseButton1 then _flyDown=true end
-    end)
-    downBtn.InputEnded:Connect(function(i)
-        if i.UserInputType==Enum.UserInputType.Touch or i.UserInputType==Enum.UserInputType.MouseButton1 then _flyDown=false end
-    end)
-    local function updateBtn(state)
-        btn.Text = "✈  FLY: "..(state and "ON" or "OFF")
-        speedLbl.Text = "Speed: "..flySpeed
-        grad.Color = ColorSequence.new{
-            ColorSequenceKeypoint.new(0, state and Color3.fromRGB(50,200,50) or Color3.fromRGB(70,70,70)),
-            ColorSequenceKeypoint.new(1, state and Color3.fromRGB(50,255,50) or Color3.fromRGB(40,40,40)),
-        }
-    end
-    btn.MouseButton1Click:Connect(function()
-        flyMiniActive = not flyMiniActive
-        updateBtn(flyMiniActive)
-        if flyMiniActive then
-            local char = player.Character if not char then return end
-            local hrp = char:FindFirstChild("HumanoidRootPart") if not hrp then return end
-            local hum = char:FindFirstChildOfClass("Humanoid") if not hum then return end
-            hum.PlatformStand = true
-            flyAtt = Instance.new("Attachment", hrp)
-            flyLV  = Instance.new("LinearVelocity", hrp)
-            flyLV.MaxForce = math.huge
-            flyLV.VelocityConstraintMode = Enum.VelocityConstraintMode.Vector
-            flyLV.VectorVelocity = Vector3.new(0,0,0)
-            flyLV.Attachment0 = flyAtt
-        else
-            _flyUp=false _flyDown=false
-            if flyLV  then flyLV:Destroy()  flyLV  = nil end
-            if flyAtt then flyAtt:Destroy() flyAtt = nil end
-            local char = player.Character if not char then return end
-            local hum = char:FindFirstChildOfClass("Humanoid") if hum then hum.PlatformStand = false end
-        end
-    end)
-    local dragging, dragStart, startPos = false, nil, nil
-    panel.InputBegan:Connect(function(i)
-        if i.UserInputType==Enum.UserInputType.Touch or i.UserInputType==Enum.UserInputType.MouseButton1 then
-            dragging=true dragStart=i.Position startPos=panel.Position
-            i.Changed:Connect(function() if i.UserInputState==Enum.UserInputState.End then dragging=false end end)
-        end
-    end)
-    panel.InputChanged:Connect(function(i)
-        if dragging and (i.UserInputType==Enum.UserInputType.Touch or i.UserInputType==Enum.UserInputType.MouseMovement) then
-            local d=i.Position-dragStart
-            local vp=workspace.CurrentCamera.ViewportSize
-            panel.Position=UDim2.new(0,math.clamp(startPos.X.Offset+d.X,0,vp.X-panel.AbsoluteSize.X),0,math.clamp(startPos.Y.Offset+d.Y,0,vp.Y-panel.AbsoluteSize.Y))
-        end
-    end)
-    updateBtn(false)
-    flyMiniGui = sg
-end
-
-local function startFly()
-    createFlyMiniToggle()
-    local cam = workspace.CurrentCamera
-    flyConn = RunService.RenderStepped:Connect(function()
-        if not flyEnabled or not flyMiniActive then return end
-        local char = player.Character if not char then return end
-        local hrp = char:FindFirstChild("HumanoidRootPart") if not hrp then return end
-        local hum = char:FindFirstChildOfClass("Humanoid") if not hum then return end
-        if not flyLV or not flyAtt then return end
-        local moveDir = Vector3.new(0,0,0)
-        local cf = cam.CFrame
-        local md = hum.MoveDirection
-        if md.Magnitude > 0.1 then moveDir = moveDir + Vector3.new(md.X, 0, md.Z) end
-        if UserInputService:IsKeyDown(Enum.KeyCode.W) or UserInputService:IsKeyDown(Enum.KeyCode.Up)    then moveDir = moveDir + cf.LookVector  end
-        if UserInputService:IsKeyDown(Enum.KeyCode.S) or UserInputService:IsKeyDown(Enum.KeyCode.Down)  then moveDir = moveDir - cf.LookVector  end
-        if UserInputService:IsKeyDown(Enum.KeyCode.A) or UserInputService:IsKeyDown(Enum.KeyCode.Left)  then moveDir = moveDir - cf.RightVector end
-        if UserInputService:IsKeyDown(Enum.KeyCode.D) or UserInputService:IsKeyDown(Enum.KeyCode.Right) then moveDir = moveDir + cf.RightVector end
-        if UserInputService:IsKeyDown(Enum.KeyCode.Space) or _flyUp   then moveDir = moveDir + Vector3.new(0,1,0) end
-        if UserInputService:IsKeyDown(Enum.KeyCode.LeftControl) or _flyDown then moveDir = moveDir - Vector3.new(0,1,0) end
-        flyLV.VectorVelocity = moveDir.Magnitude > 0 and moveDir.Unit * flySpeed or Vector3.new(0,0,0)
-    end)
-end
-
-local function stopFly()
-    if flyConn  then flyConn:Disconnect()  flyConn  = nil end
-    if flyLV    then flyLV:Destroy()       flyLV    = nil end
-    if flyAtt   then flyAtt:Destroy()      flyAtt   = nil end
-    if flyMiniGui then flyMiniGui:Destroy() flyMiniGui = nil end
-    flyMiniActive = false _flyUp = false _flyDown = false
-    local char = player.Character if not char then return end
-    local hum = char:FindFirstChildOfClass("Humanoid") if hum then hum.PlatformStand = false end
 end
 
 -- Fly Spin
@@ -1429,323 +1569,185 @@ player.CharacterAdded:Connect(onCharacterAdded)
 if player.Character then onCharacterAdded(player.Character) end
 
 -- =====================================================================
--- WINDOW OBSIDIAN
+-- NAMELESS_LIB INTERFACE
 -- =====================================================================
-local Window = Library:CreateWindow({
-    Title = "Nameless Client",
-    Footer = "By HimselfZen",
-    ShowCustomCursor = true,
-    NotifySide = "Right",
+local KeybindList = Library:KeybindList("Keybinds")
+local Window = Library:Window({
+    Name    = "Nameless Client",
+    SubName = "Kill Aura V7 + Fly V3 + SA Module",
+    Logo    = "81786914450484"
 })
 
-local Tabs = {
-    Main     = Window:AddTab("Main",     "home"),
-    Legit    = Window:AddTab("Legit",    "crosshair"),
-    Player   = Window:AddTab("Player",   "user"),
-    Glitch   = Window:AddTab("Glitch",   "zap"),
-    Visual   = Window:AddTab("Visual",   "eye"),
-    Font     = Window:AddTab("Font",     "type"),
-    Settings = Window:AddTab("Settings", "settings"),
-}
+Library:Watermark({ "Nameless Client", "|", "Blox Fruits" })
+if Library.WatermarkFrame then Library.WatermarkFrame.Instance.Visible = true end
 
--- =====================================================================
--- TAB MAIN — Soru Auto Aim
--- =====================================================================
-local SoruBox = Tabs.Main:AddLeftGroupbox("Soru Auto Aim")
+-- PAGE MAIN — Soru Auto Aim
+local PageMain = Window:Page({ Name = "Main", Icon = "131319188753430" })
+local SecSoru = PageMain:Section({ Name = "Soru Auto Aim", Side = 1, Icon = "131319188753430" })
+
+SecSoru:Toggle({ Name="Soru Auto Aim",    Flag="SoruToggle", Default=false, Callback=function(v) getgenv().SoruAutoAim = v if not v then CurrentTarget = nil end end })
 
 local soruPlayerNames = {"None"}
-for _, p in pairs(Players:GetPlayers()) do
-    if p ~= player then table.insert(soruPlayerNames, p.Name) end
-end
-Players.PlayerAdded:Connect(function(p)
-    if p ~= player then table.insert(soruPlayerNames, p.Name) end
-end)
+for _, p in pairs(Players:GetPlayers()) do if p ~= player then table.insert(soruPlayerNames, p.Name) end end
+Players.PlayerAdded:Connect(function(p) if p ~= player then table.insert(soruPlayerNames, p.Name) end end)
 
-SoruBox:AddToggle("SoruAimToggle", {
-    Text = "Soru Auto Aim", Default = false,
-    Tooltip = "Redirige tes attaques vers l'ennemi le plus proche (ignore les alliés)",
-    Callback = function(v)
-        SoruAutoAimEnabled = v
-        getgenv().SoruAutoAim = v
-        if not v then CurrentTarget = nil end
-    end,
-})
+SecSoru:Dropdown({ Name="Lock On Player", Flag="SoruLock", Items=soruPlayerNames, Default="None",
+    Callback=function(v) if v == "None" then SoruSelectedPlayer = nil else local found = Players:FindFirstChild(v) if found then SoruSelectedPlayer = found end end end })
 
-SoruBox:AddDropdown("SoruSelectPlayer", {
-    Values = soruPlayerNames, Default = 1,
-    Text = "Select Target",
-    Tooltip = "Lock sur un joueur spécifique (None = auto)",
-    Callback = function(v)
-        if v == "None" then SoruSelectedPlayer = nil
-        else local found = Players:FindFirstChild(v) if found then SoruSelectedPlayer = found end end
-    end,
-})
+-- PAGE LEGIT — Silent Aim + Kill Aura
+local PageLegit = Window:Page({ Name = "Legit", Icon = "131319188753430" })
+local SecSA = PageLegit:Section({ Name = "Silent Aim", Side = 1, Icon = "131319188753430" })
+local SecKA = PageLegit:Section({ Name = "Kill Aura", Side = 2, Icon = "73789337996373" })
 
--- =====================================================================
--- TAB LEGIT — Silent Aim (Nameless SA Module)
--- =====================================================================
-local SABox     = Tabs.Legit:AddLeftGroupbox("Silent Aim")
-local SACombBox = Tabs.Legit:AddRightGroupbox("Combat")
+SecSA:Toggle({ Name="Silent Aim Players",    Flag="SAPlayers",   Default=false, Callback=function(v) SA:SetPlayerSilentAim(v) end })
+SecSA:Toggle({ Name="Silent Aim NPCs",       Flag="SANpcs",      Default=false, Callback=function(v) SA:SetNPCSilentAim(v) end })
+SecSA:Toggle({ Name="Skills Redirect (Z/X/C/V/F)", Flag="ZSkills", Default=false, Callback=function(v) SA:SetZSkills(v) end })
+SecSA:Toggle({ Name="Prediction",            Flag="SAPred",      Default=false, Callback=function(v) SA:SetPrediction(v) end })
+SecSA:Slider({ Name="Prediction Amount", Flag="SAPredAmt", Min=0.05, Max=0.5, Default=0.1, Decimals=0.01, Suffix="s", Callback=function(v) SA:SetPredictionAmount(v) end })
+SecSA:Slider({ Name="Distance Limit",    Flag="SADist",    Min=100, Max=1000, Default=1000, Decimals=50, Suffix="m", Callback=function(v) SA:SetDistanceLimit(v) end })
+SecSA:Toggle({ Name="Target Highlight",      Flag="SAHighlight", Default=false, Callback=function(v) SA:SetHighlight(v) end })
+SecSA:Toggle({ Name="Target Info",           Flag="SAInfo",      Default=false, Callback=function(v) SA:SetInfo(v) end })
+SecSA:Toggle({ Name="Mini Toggle Players",   Flag="SAMiniP",     Default=false, Callback=function(v) SA:SetMiniTogglePlayerSilentAim(v) end })
+SecSA:Toggle({ Name="Mini Toggle NPCs",      Flag="SAMiniN",     Default=false, Callback=function(v) SA:SetMiniToggleNpcSilentAim(v) end })
 
-SABox:AddToggle("SilentAimPlayers", {
-    Text = "Silent Aim Players", Default = false,
-    Tooltip = "Redirige tes attaques vers le joueur le plus proche",
-    Callback = function(v) SA:SetPlayerSilentAim(v) end,
-})
-SABox:AddToggle("SilentAimNPCs", {
-    Text = "Silent Aim NPCs", Default = false,
-    Tooltip = "Redirige tes attaques vers le NPC le plus proche",
-    Callback = function(v) SA:SetNPCSilentAim(v) end,
-})
-SABox:AddToggle("ZSkillsRedirect", {
-    Text = "Skills Redirect (Z/X/C/V/F)", Default = false,
-    Tooltip = "Active la redirection sur toutes les skills",
-    Callback = function(v) SA:SetZSkills(v) end,
-})
-SABox:AddToggle("SAPrediction", {
-    Text = "Prediction", Default = false,
-    Callback = function(v) SA:SetPrediction(v) end,
-})
-SABox:AddSlider("SAPredAmount", {
-    Text = "Prediction Amount", Default = 1, Min = 1, Max = 5, Rounding = 0, Suffix = "00ms",
-    Callback = function(v) SA:SetPredictionAmount(v / 10) end,
-})
-SABox:AddSlider("SADistLimit", {
-    Text = "Distance Limit", Default = 1000, Min = 100, Max = 3000, Rounding = 0, Suffix = "m",
-    Callback = function(v) SA:SetDistanceLimit(v) end,
-})
-SABox:AddToggle("SAHighlight", {
-    Text = "Target Highlight", Default = false,
-    Callback = function(v) SA:SetHighlight(v) end,
-})
-SABox:AddToggle("SAInfo", {
-    Text = "Target Info (Name/HP)", Default = false,
-    Callback = function(v) SA:SetInfo(v) end,
-})
-SABox:AddToggle("SAMiniP", {
-    Text = "Mini Toggle Players", Default = false,
-    Callback = function(v) SA:SetMiniTogglePlayerSilentAim(v) end,
-})
-SABox:AddToggle("SAMiniN", {
-    Text = "Mini Toggle NPCs", Default = false,
-    Callback = function(v) SA:SetMiniToggleNpcSilentAim(v) end,
-})
+SecKA:Toggle({ Name="Enable Kill Aura", Flag="KAToggle", Default=false, Callback=function(v) KillAura:Toggle(v) end })
+
+-- PAGE LEGIT (ajout Auto Ken + SA Lock Player)
+local SecCombat = PageLegit:Section({ Name = "Combat", Side = 1, Icon = "131319188753430" })
+
+SecCombat:Toggle({ Name="Auto Ken", Flag="AutoKen", Default=false, Callback=function(v) SA:SetAutoKen(v) end })
 
 local saPlayerNames = {"None"}
-for _, p in pairs(Players:GetPlayers()) do
-    if p ~= player then table.insert(saPlayerNames, p.Name) end
+for _, pl in ipairs(Players:GetPlayers()) do if pl ~= player then table.insert(saPlayerNames, pl.Name) end end
+local saPlayerDrop = SecSA:Dropdown({ Name="Lock On Player", Flag="SALock", Items=saPlayerNames, Default="None",
+    Callback=function(v) SA:SetSelectedPlayer(v=="None" and nil or v) end })
+local function RefreshSAPlayers()
+    local list = {"None"}
+    for _, pl in ipairs(Players:GetPlayers()) do if pl ~= player then table.insert(list, pl.Name) end end
+    saPlayerDrop:Refresh(list)
 end
-Players.PlayerAdded:Connect(function(p)
-    if p ~= player then table.insert(saPlayerNames, p.Name) end
-end)
+Players.PlayerAdded:Connect(RefreshSAPlayers)
+Players.PlayerRemoving:Connect(RefreshSAPlayers)
 
-SABox:AddDropdown("SASelectPlayer", {
-    Values = saPlayerNames, Default = 1,
-    Text = "Lock On Player",
-    Tooltip = "Lock sur un joueur spécifique (None = auto)",
-    Callback = function(v) SA:SetSelectedPlayer(v == "None" and nil or v) end,
-})
-
-SACombBox:AddToggle("SAAutoKen", {
-    Text = "Auto Ken", Default = false,
-    Callback = function(v) SA:SetAutoKen(v) end,
-})
-
--- =====================================================================
--- TAB PLAYER
--- =====================================================================
-local FakeItemsBox  = Tabs.Player:AddLeftGroupbox("Fake Items")
-local PlayerMoveBox = Tabs.Player:AddRightGroupbox("Movement")
+-- PAGE PLAYER
+local PagePlayer = Window:Page({ Name = "Player", Icon = "81598136527047" })
+local SecFakeItems = PagePlayer:Section({ Name = "Fake Items", Side = 1, Icon = "81598136527047" })
+local SecMove = PagePlayer:Section({ Name = "Movement", Side = 2, Icon = "131319188753430" })
 
 -- Fake Korblox
-FakeItemsBox:AddDropdown("KorbloxVersion", {
-    Values = {"V1","V2"}, Default = 1, Text = "Korblox Version",
-    Callback = function(v)
-        fakeKorbloxVersion = v
-        if fakeKorbloxEnabled then removeFakeKorblox() applyFakeKorblox() end
-    end,
-})
-FakeItemsBox:AddToggle("FakeKorblox", {
-    Text = "Fake Korblox", Default = false,
-    Callback = function(v) fakeKorbloxEnabled = v if v then applyFakeKorblox() else removeFakeKorblox() end end,
-})
-FakeItemsBox:AddDivider()
-FakeItemsBox:AddDropdown("HeadlessVersion", {
-    Values = {"V1","V2"}, Default = 1, Text = "Headless Version",
-    Callback = function(v)
-        fakeHeadlessVersion = v
-        if fakeHeadlessEnabled then removeFakeHeadless() applyFakeHeadless() end
-    end,
-})
-FakeItemsBox:AddToggle("FakeHeadless", {
-    Text = "Fake Headless", Default = false,
-    Callback = function(v) fakeHeadlessEnabled = v if v then applyFakeHeadless() else removeFakeHeadless() end end,
-})
-FakeItemsBox:AddDivider()
-FakeItemsBox:AddToggle("Stretched", {
-    Text = "Stretched Screen", Default = false,
-    Callback = function(v) stretchedEnabled = v if v then applyStretched() else removeStretched() end end,
-})
-FakeItemsBox:AddSlider("StretchAmount", {
-    Text = "Stretch Amount", Default = 65, Min = 50, Max = 100, Rounding = 0, Suffix = "%",
-    Callback = function(v) stretchedAmount = v/100 if stretchedEnabled then applyStretched() end end,
-})
+SecFakeItems:Dropdown({ Name="Korblox Version", Flag="KorbloxVersion", Items={"V1","V2"}, Default="V1",
+    Callback=function(v) fakeKorbloxVersion = v if fakeKorbloxEnabled then removeFakeKorblox() applyFakeKorblox() end end })
+SecFakeItems:Toggle({ Name="Fake Korblox", Flag="FakeKorblox", Default=false, 
+    Callback=function(v) fakeKorbloxEnabled = v if v then applyFakeKorblox() else removeFakeKorblox() end end })
+
+-- Fake Headless
+SecFakeItems:Dropdown({ Name="Headless Version", Flag="HeadlessVersion", Items={"V1","V2"}, Default="V1",
+    Callback=function(v) fakeHeadlessVersion = v if fakeHeadlessEnabled then removeFakeHeadless() applyFakeHeadless() end end })
+SecFakeItems:Toggle({ Name="Fake Headless", Flag="FakeHeadless", Default=false, 
+    Callback=function(v) fakeHeadlessEnabled = v if v then applyFakeHeadless() else removeFakeHeadless() end end })
+
+-- Stretched Screen
+SecFakeItems:Toggle({ Name="Stretched Screen", Flag="Stretched", Default=false, 
+    Callback=function(v) stretchedEnabled = v if v then applyStretched() else removeStretched() end end })
+SecFakeItems:Slider({ Name="Stretch Amount", Flag="StretchAmount", Min=50, Max=100, Default=65, Decimals=1, Suffix="%",
+    Callback=function(v) stretchedAmount = v/100 if stretchedEnabled then applyStretched() end end })
 
 -- Movement
-PlayerMoveBox:AddToggle("JumpBoost", {
-    Text = "Jump Boost", Default = false,
-    Callback = function(v) jumpEnabled = v if v then applyJump() else resetJump() end end,
-})
-PlayerMoveBox:AddSlider("JumpPower", {
-    Text = "Jump Power", Default = 100, Min = 50, Max = 500, Rounding = 0,
-    Callback = function(v) jumpPower = v if jumpEnabled then applyJump() end end,
-})
-PlayerMoveBox:AddDivider()
-PlayerMoveBox:AddToggle("SpeedHack", {
-    Text = "Speed Hack", Default = false,
-    Callback = function(v) speedEnabled = v if v then applySpeed() else resetSpeed() end end,
-})
-PlayerMoveBox:AddSlider("SpeedValue", {
-    Text = "Walk Speed", Default = 50, Min = 16, Max = 50000, Rounding = 0,
-    Callback = function(v) speedValue = v if speedEnabled then applySpeed() end end,
-})
-PlayerMoveBox:AddDivider()
-PlayerMoveBox:AddToggle("FlyNormal", {
-    Text = "Fly", Default = false,
-    Tooltip = "W/A/S/D + Space/Ctrl pour voler",
-    Callback = function(v) flyEnabled = v if v then startFly() else stopFly() end end,
-})
-PlayerMoveBox:AddSlider("FlySpeed", {
-    Text = "Fly Speed", Default = 50, Min = 10, Max = 300, Rounding = 0,
-    Callback = function(v)
-        flySpeed = v
-        if flyMiniGui then
-            local panel = flyMiniGui:FindFirstChildOfClass("Frame")
-            if panel then
-                local lbl = panel:FindFirstChildOfClass("TextLabel")
-                if lbl then lbl.Text = "Speed: "..flySpeed end
-            end
-        end
-    end,
-})
-PlayerMoveBox:AddDivider()
-PlayerMoveBox:AddToggle("FlySpin", {
-    Text = "Fly Spin", Default = false,
-    Callback = function(v) flySpinEnabled = v if v then startFlySpin() else stopFlySpin() end end,
-})
-PlayerMoveBox:AddSlider("FlySpinSpeed", {
-    Text = "Spin Speed", Default = 50, Min = 5, Max = 200, Rounding = 0,
-    Callback = function(v) flySpinSpeed = v end,
+SecMove:Toggle({ Name="Jump Boost", Flag="JumpBoost", Default=false, 
+    Callback=function(v) jumpEnabled = v if v then applyJump() else resetJump() end end })
+SecMove:Slider({ Name="Jump Power", Flag="JumpPower", Min=50, Max=500, Default=100, Decimals=1, Suffix="",
+    Callback=function(v) jumpPower = v if jumpEnabled then applyJump() end end })
+
+SecMove:Toggle({ Name="Speed Hack", Flag="SpeedHack", Default=false, 
+    Callback=function(v) speedEnabled = v if v then applySpeed() else resetSpeed() end end })
+SecMove:Slider({ Name="Walk Speed", Flag="SpeedValue", Min=16, Max=50000, Default=50, Decimals=1, Suffix="",
+    Callback=function(v) speedValue = v if speedEnabled then applySpeed() end end })
+
+-- Fly
+SecMove:Dropdown({ Name="Fly Mode", Flag="FlyMode", Items={"CFrame", "Velocity", "Swim", "TP-Fast", "Float", "Tween"}, Default="CFrame",
+    Callback=function(v) FlyExploit:SetMode(v) end })
+SecMove:Toggle({ Name="Enable Fly", Flag="FlyToggle", Default=false, 
+    Callback=function(v) FlyExploit:ToggleFly(v) end })
+SecMove:Slider({ Name="Fly Speed", Flag="FlySpeed", Min=10, Max=500, Default=50, Decimals=1, Suffix="",
+    Callback=function(v) FlyExploit:SetSpeed(v) end })
+
+SecMove:Toggle({ Name="NoClip", Flag="NoClip", Default=false, 
+    Callback=function(v) FlyExploit:ToggleNoClip(v) end })
+
+-- Fly Spin
+SecMove:Toggle({ Name="Fly Spin", Flag="FlySpin", Default=false, 
+    Callback=function(v) flySpinEnabled = v if v then startFlySpin() else stopFlySpin() end end })
+SecMove:Slider({ Name="Spin Speed", Flag="FlySpinSpeed", Min=5, Max=200, Default=50, Decimals=1, Suffix="",
+    Callback=function(v) flySpinSpeed = v end })
+
+-- PAGE GLITCH
+local PageGlitch = Window:Page({ Name = "Glitch", Icon = "73789337996373" })
+local SecSanguine = PageGlitch:Section({ Name = "Sanguine", Side = 1, Icon = "73789337996373" })
+local SecDiamond = PageGlitch:Section({ Name = "Diamond", Side = 2, Icon = "73789337996373" })
+
+SecSanguine:Toggle({ Name="Sanguine Z Boost", Flag="SanguineGlitch", Default=false, 
+    Callback=function(v) multiEnabled = v if not v then multiCharging = false multiChargeStart = 0 end end })
+SecSanguine:Slider({ Name="Puissance", Flag="SanguinePower", Min=100, Max=5000, Default=400, Decimals=50, Suffix=" force",
+    Callback=function(v) multiPower = v end })
+SecSanguine:Slider({ Name="Durée", Flag="SanguineDuration", Min=10, Max=200, Default=90, Decimals=1, Suffix=" cs",
+    Callback=function(v) multiDuration = v/100 end })
+
+SecDiamond:Toggle({ Name="Diamond Glitch", Flag="DiamondGlitch", Default=false, 
+    Callback=function(v) diamondEnabled = v if not v then diamondCharging = false diamondChargeStart = 0 end end })
+SecDiamond:Slider({ Name="Puissance", Flag="DiamondPower", Min=100, Max=5000, Default=400, Decimals=50, Suffix=" force",
+    Callback=function(v) diamondPower = v end })
+SecDiamond:Slider({ Name="Durée", Flag="DiamondDuration", Min=10, Max=200, Default=90, Decimals=1, Suffix=" cs",
+    Callback=function(v) diamondDuration = v/100 end })
+SecDiamond:Slider({ Name="Charge Min", Flag="DiamondCharge", Min=1, Max=50, Default=10, Decimals=1, Suffix="00ms",
+    Callback=function(v) diamondRequiredCharge = v/10 end })
+
+-- PAGE VISUAL
+local PageVisual = Window:Page({ Name = "Visual", Icon = "122669828593160" })
+local SecESP = PageVisual:Section({ Name = "ESP Players", Side = 1, Icon = "122669828593160" })
+local SecESPNPC = PageVisual:Section({ Name = "ESP NPC", Side = 2, Icon = "122669828593160" })
+
+SecESP:Toggle({ Name="ESP Players", Flag="ESPPlayers", Default=false, 
+    Callback=function(v) ESPEnabled = v if ESPEnabled or ESPNPCEnabled then startESP() else stopESP() end end })
+
+SecESP:Toggle({ Name="Box",               Flag="ESPBox",         Default=true,  Callback=function(v) ESPBox = v end })
+SecESP:Toggle({ Name="Corner Box",       Flag="ESPCornerBox",   Default=false, Callback=function(v) ESPCornerBox = v end })
+SecESP:Toggle({ Name="Filled Box",       Flag="ESPFilledBox",   Default=false, Callback=function(v) ESPFilledBox = v end })
+SecESP:Toggle({ Name="Lines",            Flag="ESPLines",       Default=true,  Callback=function(v) ESPLines = v end })
+
+SecESP:Toggle({ Name="Name",             Flag="ESPName",        Default=true,  Callback=function(v) ESPName = v end })
+SecESP:Toggle({ Name="Distance",         Flag="ESPDistance",    Default=true,  Callback=function(v) ESPDistance = v end })
+SecESP:Toggle({ Name="Team",             Flag="ESPTeam",        Default=false, Callback=function(v) ESPTeam = v end })
+SecESP:Toggle({ Name="Bounty",           Flag="ESPBounty",      Default=false, Callback=function(v) ESPBounty = v end })
+SecESP:Toggle({ Name="Weapon",           Flag="ESPWeapon",      Default=false, Callback=function(v) ESPWeapon = v end })
+
+SecESP:Toggle({ Name="Health Bar",       Flag="ESPHealthBar",   Default=true,  Callback=function(v) ESPHealthBar = v end })
+SecESP:Toggle({ Name="Health Number",    Flag="ESPHealthNum",   Default=false, Callback=function(v) ESPHealthNum = v end })
+
+SecESP:Toggle({ Name="Skeleton",         Flag="ESPSkeleton",    Default=false, Callback=function(v) ESPSkeleton = v end })
+SecESP:Toggle({ Name="Head Dot",         Flag="ESPHeadDot",     Default=false, Callback=function(v) ESPHeadDot = v end })
+SecESP:Toggle({ Name="Off-Screen Arrows",Flag="ESPOffScreen",   Default=false, Callback=function(v) ESPOffScreen = v end })
+SecESP:Toggle({ Name="Chams",            Flag="ESPChams",       Default=false, Callback=function(v) ESPChams = v end })
+
+SecESPNPC:Toggle({ Name="ESP NPCs", Flag="ESPNpcs", Default=false, 
+    Callback=function(v) ESPNPCEnabled = v if ESPEnabled or ESPNPCEnabled then startESP() else stopESP() end end })
+
+SecESPNPC:Toggle({ Name="Box",      Flag="ESPNpcBox",    Default=true,  Callback=function(v) ESPNPCBox_v = v end })
+SecESPNPC:Toggle({ Name="Name",     Flag="ESPNpcName",   Default=true,  Callback=function(v) ESPNPCName_v = v end })
+SecESPNPC:Toggle({ Name="Distance", Flag="ESPNpcDist",   Default=true,  Callback=function(v) ESPNPCDist_v = v end })
+SecESPNPC:Toggle({ Name="Health Bar",Flag="ESPNpcHp",    Default=true,  Callback=function(v) ESPNPCHp_v = v end })
+SecESPNPC:Toggle({ Name="Chams",    Flag="ESPNpcChams",  Default=false, Callback=function(v) ESPNPCChams_v = v end })
+
+-- PAGE SETTINGS
+Library:CreateSettingsPage(Window, KeybindList)
+
+-- INIT
+Window:Init()
+
+Library:Notification({
+    Title       = "Nameless Client",
+    Description = "Loaded successfully with nameless_lib! ✅",
+    Duration    = 3,
+    Icon        = "73789337996373"
 })
 
--- =====================================================================
--- TAB GLITCH
--- =====================================================================
-local SanguineBox = Tabs.Glitch:AddLeftGroupbox("Sanguine Glitch")
-local DiamondBox  = Tabs.Glitch:AddRightGroupbox("Diamond Glitch")
-
-SanguineBox:AddToggle("SanguineGlitch", {
-    Text = "Sanguine Z Boost", Default = false,
-    Tooltip = "Détecte GhoulZCharge → propulsion vers ta visée",
-    Callback = function(v) multiEnabled = v if not v then multiCharging = false multiChargeStart = 0 end end,
-})
-SanguineBox:AddSlider("SanguinePower", {
-    Text = "Puissance", Default = 1000, Min = 100, Max = 5000, Rounding = 0, Suffix = " force",
-    Callback = function(v) multiPower = v end,
-})
-SanguineBox:AddSlider("SanguineDuration", {
-    Text = "Durée", Default = 60, Min = 10, Max = 200, Rounding = 0, Suffix = " cs",
-    Callback = function(v) multiDuration = v/100 end,
-})
-
-DiamondBox:AddToggle("DiamondGlitch", {
-    Text = "Diamond Glitch", Default = false,
-    Tooltip = "Détecte CombatZ → propulsion vers ta visée",
-    Callback = function(v) diamondEnabled = v if not v then diamondCharging = false diamondChargeStart = 0 end end,
-})
-DiamondBox:AddSlider("DiamondPower", {
-    Text = "Puissance", Default = 400, Min = 100, Max = 5000, Rounding = 0, Suffix = " force",
-    Callback = function(v) diamondPower = v end,
-})
-DiamondBox:AddSlider("DiamondDuration", {
-    Text = "Durée", Default = 90, Min = 10, Max = 200, Rounding = 0, Suffix = " cs",
-    Callback = function(v) diamondDuration = v/100 end,
-})
-DiamondBox:AddSlider("DiamondCharge", {
-    Text = "Charge Min", Default = 10, Min = 1, Max = 50, Rounding = 0, Suffix = "00ms",
-    Callback = function(v) diamondRequiredCharge = v/10 end,
-})
-
--- =====================================================================
--- TAB VISUAL — ESP
--- =====================================================================
-local ESPPlayersBox = Tabs.Visual:AddLeftGroupbox("ESP Players")
-local ESPNPCBox     = Tabs.Visual:AddRightGroupbox("ESP NPC")
-
-ESPPlayersBox:AddToggle("ESPPlayers", {
-    Text = "ESP Players", Default = false,
-    Callback = function(v) ESPEnabled = v
-        if ESPEnabled or ESPNPCEnabled then startESP() else stopESP() end
-    end,
-})
-ESPPlayersBox:AddDivider()
-ESPPlayersBox:AddToggle("ESPBox",       { Text = "Box",               Default = true,  Callback = function(v) ESPBox       = v end })
-ESPPlayersBox:AddToggle("ESPCornerBox", { Text = "Corner Box",        Default = false, Callback = function(v) ESPCornerBox = v end })
-ESPPlayersBox:AddToggle("ESPFilledBox", { Text = "Filled Box",        Default = false, Callback = function(v) ESPFilledBox = v end })
-ESPPlayersBox:AddToggle("ESPLines",     { Text = "Lines (haut milieu)", Default = true, Callback = function(v) ESPLines    = v end })
-ESPPlayersBox:AddDivider()
-ESPPlayersBox:AddToggle("ESPName",      { Text = "Name",              Default = true,  Callback = function(v) ESPName      = v end })
-ESPPlayersBox:AddToggle("ESPDistance",  { Text = "Distance",          Default = true,  Callback = function(v) ESPDistance  = v end })
-ESPPlayersBox:AddToggle("ESPTeam",      { Text = "Team",              Default = false, Callback = function(v) ESPTeam      = v end })
-ESPPlayersBox:AddToggle("ESPBounty",    { Text = "Bounty",            Default = false, Callback = function(v) ESPBounty    = v end })
-ESPPlayersBox:AddToggle("ESPWeapon",    { Text = "Weapon",            Default = false, Callback = function(v) ESPWeapon    = v end })
-ESPPlayersBox:AddDivider()
-ESPPlayersBox:AddToggle("ESPHealthBar", { Text = "Health Bar",        Default = true,  Callback = function(v) ESPHealthBar = v end })
-ESPPlayersBox:AddToggle("ESPHealthNum", { Text = "Health Number",     Default = false, Callback = function(v) ESPHealthNum = v end })
-ESPPlayersBox:AddDivider()
-ESPPlayersBox:AddToggle("ESPSkeleton",  { Text = "Skeleton",          Default = false, Callback = function(v) ESPSkeleton  = v end })
-ESPPlayersBox:AddToggle("ESPHeadDot",   { Text = "Head Dot",          Default = false, Callback = function(v) ESPHeadDot   = v end })
-ESPPlayersBox:AddToggle("ESPOffScreen", { Text = "Off-Screen Arrows", Default = false, Callback = function(v) ESPOffScreen = v end })
-ESPPlayersBox:AddToggle("ESPChams",     { Text = "Chams",             Default = false, Callback = function(v) ESPChams     = v end })
-
-ESPNPCBox:AddToggle("ESPNPCs", {
-    Text = "ESP NPCs", Default = false,
-    Callback = function(v) ESPNPCEnabled = v
-        if ESPEnabled or ESPNPCEnabled then startESP() else stopESP() end
-    end,
-})
-ESPNPCBox:AddDivider()
-ESPNPCBox:AddToggle("ESPNPCBoxFlag",  { Text = "Box",        Default = true,  Callback = function(v) ESPNPCBox_v   = v end })
-ESPNPCBox:AddToggle("ESPNPCNameFlag", { Text = "Name",       Default = true,  Callback = function(v) ESPNPCName_v  = v end })
-ESPNPCBox:AddToggle("ESPNPCDistFlag", { Text = "Distance",   Default = true,  Callback = function(v) ESPNPCDist_v  = v end })
-ESPNPCBox:AddToggle("ESPNPCHpFlag",   { Text = "Health Bar", Default = true,  Callback = function(v) ESPNPCHp_v    = v end })
-ESPNPCBox:AddToggle("ESPNPCChamsF",   { Text = "Chams",      Default = false, Callback = function(v) ESPNPCChams_v = v end })
-
--- =====================================================================
--- TAB SETTINGS
--- =====================================================================
-local MenuGroup = Tabs.Settings:AddLeftGroupbox("Menu")
-
-MenuGroup:AddLabel("Menu bind"):AddKeyPicker("MenuKeybind", {
-    Default = "RightShift", NoUI = true, Text = "Menu keybind",
-})
-Library.ToggleKeybind = Options.MenuKeybind
-
-ThemeManager:SetLibrary(Library)
-SaveManager:SetLibrary(Library)
-SaveManager:IgnoreThemeSettings()
-SaveManager:SetIgnoreIndexes({ "MenuKeybind" })
-ThemeManager:SetFolder("NamelessClient")
-SaveManager:SetFolder("NamelessClient")
-
-ThemeManager:ApplyToGroupbox(MenuGroup)
-SaveManager:BuildConfigSection(Tabs.Settings)
-SaveManager:LoadAutoloadConfig()
-
-Library:Notify({
-    Title = "Nameless Client",
-    Description = "Chargé avec succès ! SA Module intégré ✅",
-    Time = 5,
-})
-
-print("✅ Nameless Client | Obsidian + SA Module | By HimselfZen")
+print("✅ Nameless Client Loaded | Obsidian UI replaced with nameless_lib")
