@@ -1,15 +1,15 @@
--- =====================================================================
--- NAMELESS.CLIENT | Obsidian UI + Nameless SA Module + Kill Aura V7 + Fly Exploit V3
--- By HimselfZen
--- =====================================================================
+local Library = loadstring(game:HttpGet(
+    "https://raw.githubusercontent.com/ApparentlyZen/nameless_lib.lua/refs/heads/main/nameless_lib.lua"
+))()
 
-local repo = "https://raw.githubusercontent.com/deividcomsono/Obsidian/main/"
-local Library      = loadstring(game:HttpGet(repo .. "Library.lua"))()
-local ThemeManager = loadstring(game:HttpGet(repo .. "addons/ThemeManager.lua"))()
-local SaveManager  = loadstring(game:HttpGet(repo .. "addons/SaveManager.lua"))()
-
-local Options = Library.Options
-local Toggles = Library.Toggles
+Library.Folders = {
+    Directory = "Nameless Client",
+    Configs   = "Nameless Client/Configs",
+    Assets    = "Nameless Client/Assets"
+}
+for _, f in { Library.Folders.Directory, Library.Folders.Configs, Library.Folders.Assets } do
+    if not isfolder(f) then makefolder(f) end
+end
 
 -- =====================================================================
 -- SERVICES
@@ -431,9 +431,9 @@ local SA = (function()
             if drag and (i.UserInputType == Enum.UserInputType.Touch or i.UserInputType == Enum.UserInputType.MouseMovement) then
                 local d = i.Position - ds
                 btn.Position = UDim2.new(0,
-                    math.clamp(sp.X.Offset+d.X, 0, cam.ViewportSize.X-btn.AbsoluteSize.X),
+                    math.clamp(sp.X.Offset+d.X, 0, camera.ViewportSize.X-btn.AbsoluteSize.X),
                     0,
-                    math.clamp(sp.Y.Offset+d.Y, 0, cam.ViewportSize.Y-btn.AbsoluteSize.Y))
+                    math.clamp(sp.Y.Offset+d.Y, 0, camera.ViewportSize.Y-btn.AbsoluteSize.Y))
             end
         end)
         refresh(stateRef.value) return sg2
@@ -1569,340 +1569,185 @@ player.CharacterAdded:Connect(onCharacterAdded)
 if player.Character then onCharacterAdded(player.Character) end
 
 -- =====================================================================
--- WINDOW OBSIDIAN
+-- NAMELESS_LIB INTERFACE
 -- =====================================================================
-local Window = Library:CreateWindow({
-    Title = "Nameless Client",
-    Footer = "By HimselfZen",
-    ShowCustomCursor = true,
-    NotifySide = "Right",
+local KeybindList = Library:KeybindList("Keybinds")
+local Window = Library:Window({
+    Name    = "Nameless Client",
+    SubName = "Kill Aura V7 + Fly V3 + SA Module",
+    Logo    = "81786914450484"
 })
 
-local Tabs = {
-    Main     = Window:AddTab("Main",     "home"),
-    Legit    = Window:AddTab("Legit",    "crosshair"),
-    Player   = Window:AddTab("Player",   "user"),
-    Glitch   = Window:AddTab("Glitch",   "zap"),
-    Visual   = Window:AddTab("Visual",   "eye"),
-    Font     = Window:AddTab("Font",     "type"),
-    Settings = Window:AddTab("Settings", "settings"),
-}
+Library:Watermark({ "Nameless Client", "|", "Blox Fruits" })
+if Library.WatermarkFrame then Library.WatermarkFrame.Instance.Visible = true end
 
--- =====================================================================
--- TAB MAIN — Soru Auto Aim
--- =====================================================================
-local SoruBox = Tabs.Main:AddLeftGroupbox("Soru Auto Aim")
+-- PAGE MAIN — Soru Auto Aim
+local PageMain = Window:Page({ Name = "Main", Icon = "131319188753430" })
+local SecSoru = PageMain:Section({ Name = "Soru Auto Aim", Side = 1, Icon = "131319188753430" })
+
+SecSoru:Toggle({ Name="Soru Auto Aim",    Flag="SoruToggle", Default=false, Callback=function(v) getgenv().SoruAutoAim = v if not v then CurrentTarget = nil end end })
 
 local soruPlayerNames = {"None"}
-for _, p in pairs(Players:GetPlayers()) do
-    if p ~= player then table.insert(soruPlayerNames, p.Name) end
-end
-Players.PlayerAdded:Connect(function(p)
-    if p ~= player then table.insert(soruPlayerNames, p.Name) end
-end)
+for _, p in pairs(Players:GetPlayers()) do if p ~= player then table.insert(soruPlayerNames, p.Name) end end
+Players.PlayerAdded:Connect(function(p) if p ~= player then table.insert(soruPlayerNames, p.Name) end end)
 
-SoruBox:AddToggle("SoruAimToggle", {
-    Text = "Soru Auto Aim", Default = false,
-    Tooltip = "Redirige tes attaques vers l'ennemi le plus proche (ignore les alliés)",
-    Callback = function(v)
-        SoruAutoAimEnabled = v
-        getgenv().SoruAutoAim = v
-        if not v then CurrentTarget = nil end
-    end,
-})
+SecSoru:Dropdown({ Name="Lock On Player", Flag="SoruLock", Items=soruPlayerNames, Default="None",
+    Callback=function(v) if v == "None" then SoruSelectedPlayer = nil else local found = Players:FindFirstChild(v) if found then SoruSelectedPlayer = found end end end })
 
-SoruBox:AddDropdown("SoruSelectPlayer", {
-    Values = soruPlayerNames, Default = 1,
-    Text = "Select Target",
-    Tooltip = "Lock sur un joueur spécifique (None = auto)",
-    Callback = function(v)
-        if v == "None" then SoruSelectedPlayer = nil
-        else local found = Players:FindFirstChild(v) if found then SoruSelectedPlayer = found end end
-    end,
-})
+-- PAGE LEGIT — Silent Aim + Kill Aura
+local PageLegit = Window:Page({ Name = "Legit", Icon = "131319188753430" })
+local SecSA = PageLegit:Section({ Name = "Silent Aim", Side = 1, Icon = "131319188753430" })
+local SecKA = PageLegit:Section({ Name = "Kill Aura", Side = 2, Icon = "73789337996373" })
 
--- =====================================================================
--- TAB LEGIT — Silent Aim (Nameless SA Module) + Kill Aura V7
--- =====================================================================
-local SABox     = Tabs.Legit:AddLeftGroupbox("Silent Aim")
-local SACombBox = Tabs.Legit:AddRightGroupbox("Combat")
-local KABox     = Tabs.Legit:AddRightGroupbox("Kill Aura V7")
+SecSA:Toggle({ Name="Silent Aim Players",    Flag="SAPlayers",   Default=false, Callback=function(v) SA:SetPlayerSilentAim(v) end })
+SecSA:Toggle({ Name="Silent Aim NPCs",       Flag="SANpcs",      Default=false, Callback=function(v) SA:SetNPCSilentAim(v) end })
+SecSA:Toggle({ Name="Skills Redirect (Z/X/C/V/F)", Flag="ZSkills", Default=false, Callback=function(v) SA:SetZSkills(v) end })
+SecSA:Toggle({ Name="Prediction",            Flag="SAPred",      Default=false, Callback=function(v) SA:SetPrediction(v) end })
+SecSA:Slider({ Name="Prediction Amount", Flag="SAPredAmt", Min=0.05, Max=0.5, Default=0.1, Decimals=0.01, Suffix="s", Callback=function(v) SA:SetPredictionAmount(v) end })
+SecSA:Slider({ Name="Distance Limit",    Flag="SADist",    Min=100, Max=1000, Default=1000, Decimals=50, Suffix="m", Callback=function(v) SA:SetDistanceLimit(v) end })
+SecSA:Toggle({ Name="Target Highlight",      Flag="SAHighlight", Default=false, Callback=function(v) SA:SetHighlight(v) end })
+SecSA:Toggle({ Name="Target Info",           Flag="SAInfo",      Default=false, Callback=function(v) SA:SetInfo(v) end })
+SecSA:Toggle({ Name="Mini Toggle Players",   Flag="SAMiniP",     Default=false, Callback=function(v) SA:SetMiniTogglePlayerSilentAim(v) end })
+SecSA:Toggle({ Name="Mini Toggle NPCs",      Flag="SAMiniN",     Default=false, Callback=function(v) SA:SetMiniToggleNpcSilentAim(v) end })
 
-SABox:AddToggle("SilentAimPlayers", {
-    Text = "Silent Aim Players", Default = false,
-    Tooltip = "Redirige tes attaques vers le joueur le plus proche",
-    Callback = function(v) SA:SetPlayerSilentAim(v) end,
-})
-SABox:AddToggle("SilentAimNPCs", {
-    Text = "Silent Aim NPCs", Default = false,
-    Tooltip = "Redirige tes attaques vers le NPC le plus proche",
-    Callback = function(v) SA:SetNPCSilentAim(v) end,
-})
-SABox:AddToggle("ZSkillsRedirect", {
-    Text = "Skills Redirect (Z/X/C/V/F)", Default = false,
-    Tooltip = "Active la redirection sur toutes les skills",
-    Callback = function(v) SA:SetZSkills(v) end,
-})
-SABox:AddToggle("SAPrediction", {
-    Text = "Prediction", Default = false,
-    Callback = function(v) SA:SetPrediction(v) end,
-})
-SABox:AddSlider("SAPredAmount", {
-    Text = "Prediction Amount", Default = 1, Min = 1, Max = 5, Rounding = 0, Suffix = "00ms",
-    Callback = function(v) SA:SetPredictionAmount(v / 10) end,
-})
-SABox:AddSlider("SADistLimit", {
-    Text = "Distance Limit", Default = 1000, Min = 100, Max = 3000, Rounding = 0, Suffix = "m",
-    Callback = function(v) SA:SetDistanceLimit(v) end,
-})
-SABox:AddToggle("SAHighlight", {
-    Text = "Target Highlight", Default = false,
-    Callback = function(v) SA:SetHighlight(v) end,
-})
-SABox:AddToggle("SAInfo", {
-    Text = "Target Info (Name/HP)", Default = false,
-    Callback = function(v) SA:SetInfo(v) end,
-})
-SABox:AddToggle("SAMiniP", {
-    Text = "Mini Toggle Players", Default = false,
-    Callback = function(v) SA:SetMiniTogglePlayerSilentAim(v) end,
-})
-SABox:AddToggle("SAMiniN", {
-    Text = "Mini Toggle NPCs", Default = false,
-    Callback = function(v) SA:SetMiniToggleNpcSilentAim(v) end,
-})
+SecKA:Toggle({ Name="Enable Kill Aura", Flag="KAToggle", Default=false, Callback=function(v) KillAura:Toggle(v) end })
+
+-- PAGE LEGIT (ajout Auto Ken + SA Lock Player)
+local SecCombat = PageLegit:Section({ Name = "Combat", Side = 1, Icon = "131319188753430" })
+
+SecCombat:Toggle({ Name="Auto Ken", Flag="AutoKen", Default=false, Callback=function(v) SA:SetAutoKen(v) end })
 
 local saPlayerNames = {"None"}
-for _, p in pairs(Players:GetPlayers()) do
-    if p ~= player then table.insert(saPlayerNames, p.Name) end
+for _, pl in ipairs(Players:GetPlayers()) do if pl ~= player then table.insert(saPlayerNames, pl.Name) end end
+local saPlayerDrop = SecSA:Dropdown({ Name="Lock On Player", Flag="SALock", Items=saPlayerNames, Default="None",
+    Callback=function(v) SA:SetSelectedPlayer(v=="None" and nil or v) end })
+local function RefreshSAPlayers()
+    local list = {"None"}
+    for _, pl in ipairs(Players:GetPlayers()) do if pl ~= player then table.insert(list, pl.Name) end end
+    saPlayerDrop:Refresh(list)
 end
-Players.PlayerAdded:Connect(function(p)
-    if p ~= player then table.insert(saPlayerNames, p.Name) end
-end)
+Players.PlayerAdded:Connect(RefreshSAPlayers)
+Players.PlayerRemoving:Connect(RefreshSAPlayers)
 
-SABox:AddDropdown("SASelectPlayer", {
-    Values = saPlayerNames, Default = 1,
-    Text = "Lock On Player",
-    Tooltip = "Lock sur un joueur spécifique (None = auto)",
-    Callback = function(v) SA:SetSelectedPlayer(v == "None" and nil or v) end,
-})
-
-SACombBox:AddToggle("SAAutoKen", {
-    Text = "Auto Ken", Default = false,
-    Callback = function(v) SA:SetAutoKen(v) end,
-})
-
--- Kill Aura V7 Toggle
-KABox:AddToggle("KillAuraToggle", {
-    Text = "Enable Kill Aura", Default = false,
-    Tooltip = "Active/Désactive le Kill Aura V7 avec son UI complète",
-    Callback = function(v) KillAura:Toggle(v) end,
-})
-
--- =====================================================================
--- TAB PLAYER — Movement avec Fly Exploit V3
--- =====================================================================
-local FakeItemsBox  = Tabs.Player:AddLeftGroupbox("Fake Items")
-local PlayerMoveBox = Tabs.Player:AddRightGroupbox("Movement")
+-- PAGE PLAYER
+local PagePlayer = Window:Page({ Name = "Player", Icon = "81598136527047" })
+local SecFakeItems = PagePlayer:Section({ Name = "Fake Items", Side = 1, Icon = "81598136527047" })
+local SecMove = PagePlayer:Section({ Name = "Movement", Side = 2, Icon = "131319188753430" })
 
 -- Fake Korblox
-FakeItemsBox:AddDropdown("KorbloxVersion", {
-    Values = {"V1","V2"}, Default = 1, Text = "Korblox Version",
-    Callback = function(v)
-        fakeKorbloxVersion = v
-        if fakeKorbloxEnabled then removeFakeKorblox() applyFakeKorblox() end
-    end,
-})
-FakeItemsBox:AddToggle("FakeKorblox", {
-    Text = "Fake Korblox", Default = false,
-    Callback = function(v) fakeKorbloxEnabled = v if v then applyFakeKorblox() else removeFakeKorblox() end end,
-})
-FakeItemsBox:AddDivider()
-FakeItemsBox:AddDropdown("HeadlessVersion", {
-    Values = {"V1","V2"}, Default = 1, Text = "Headless Version",
-    Callback = function(v)
-        fakeHeadlessVersion = v
-        if fakeHeadlessEnabled then removeFakeHeadless() applyFakeHeadless() end
-    end,
-})
-FakeItemsBox:AddToggle("FakeHeadless", {
-    Text = "Fake Headless", Default = false,
-    Callback = function(v) fakeHeadlessEnabled = v if v then applyFakeHeadless() else removeFakeHeadless() end end,
-})
-FakeItemsBox:AddDivider()
-FakeItemsBox:AddToggle("Stretched", {
-    Text = "Stretched Screen", Default = false,
-    Callback = function(v) stretchedEnabled = v if v then applyStretched() else removeStretched() end end,
-})
-FakeItemsBox:AddSlider("StretchAmount", {
-    Text = "Stretch Amount", Default = 65, Min = 50, Max = 100, Rounding = 0, Suffix = "%",
-    Callback = function(v) stretchedAmount = v/100 if stretchedEnabled then applyStretched() end end,
+SecFakeItems:Dropdown({ Name="Korblox Version", Flag="KorbloxVersion", Items={"V1","V2"}, Default="V1",
+    Callback=function(v) fakeKorbloxVersion = v if fakeKorbloxEnabled then removeFakeKorblox() applyFakeKorblox() end end })
+SecFakeItems:Toggle({ Name="Fake Korblox", Flag="FakeKorblox", Default=false, 
+    Callback=function(v) fakeKorbloxEnabled = v if v then applyFakeKorblox() else removeFakeKorblox() end end })
+
+-- Fake Headless
+SecFakeItems:Dropdown({ Name="Headless Version", Flag="HeadlessVersion", Items={"V1","V2"}, Default="V1",
+    Callback=function(v) fakeHeadlessVersion = v if fakeHeadlessEnabled then removeFakeHeadless() applyFakeHeadless() end end })
+SecFakeItems:Toggle({ Name="Fake Headless", Flag="FakeHeadless", Default=false, 
+    Callback=function(v) fakeHeadlessEnabled = v if v then applyFakeHeadless() else removeFakeHeadless() end end })
+
+-- Stretched Screen
+SecFakeItems:Toggle({ Name="Stretched Screen", Flag="Stretched", Default=false, 
+    Callback=function(v) stretchedEnabled = v if v then applyStretched() else removeStretched() end end })
+SecFakeItems:Slider({ Name="Stretch Amount", Flag="StretchAmount", Min=50, Max=100, Default=65, Decimals=1, Suffix="%",
+    Callback=function(v) stretchedAmount = v/100 if stretchedEnabled then applyStretched() end end })
+
+-- Movement
+SecMove:Toggle({ Name="Jump Boost", Flag="JumpBoost", Default=false, 
+    Callback=function(v) jumpEnabled = v if v then applyJump() else resetJump() end end })
+SecMove:Slider({ Name="Jump Power", Flag="JumpPower", Min=50, Max=500, Default=100, Decimals=1, Suffix="",
+    Callback=function(v) jumpPower = v if jumpEnabled then applyJump() end end })
+
+SecMove:Toggle({ Name="Speed Hack", Flag="SpeedHack", Default=false, 
+    Callback=function(v) speedEnabled = v if v then applySpeed() else resetSpeed() end end })
+SecMove:Slider({ Name="Walk Speed", Flag="SpeedValue", Min=16, Max=50000, Default=50, Decimals=1, Suffix="",
+    Callback=function(v) speedValue = v if speedEnabled then applySpeed() end end })
+
+-- Fly
+SecMove:Dropdown({ Name="Fly Mode", Flag="FlyMode", Items={"CFrame", "Velocity", "Swim", "TP-Fast", "Float", "Tween"}, Default="CFrame",
+    Callback=function(v) FlyExploit:SetMode(v) end })
+SecMove:Toggle({ Name="Enable Fly", Flag="FlyToggle", Default=false, 
+    Callback=function(v) FlyExploit:ToggleFly(v) end })
+SecMove:Slider({ Name="Fly Speed", Flag="FlySpeed", Min=10, Max=500, Default=50, Decimals=1, Suffix="",
+    Callback=function(v) FlyExploit:SetSpeed(v) end })
+
+SecMove:Toggle({ Name="NoClip", Flag="NoClip", Default=false, 
+    Callback=function(v) FlyExploit:ToggleNoClip(v) end })
+
+-- Fly Spin
+SecMove:Toggle({ Name="Fly Spin", Flag="FlySpin", Default=false, 
+    Callback=function(v) flySpinEnabled = v if v then startFlySpin() else stopFlySpin() end end })
+SecMove:Slider({ Name="Spin Speed", Flag="FlySpinSpeed", Min=5, Max=200, Default=50, Decimals=1, Suffix="",
+    Callback=function(v) flySpinSpeed = v end })
+
+-- PAGE GLITCH
+local PageGlitch = Window:Page({ Name = "Glitch", Icon = "73789337996373" })
+local SecSanguine = PageGlitch:Section({ Name = "Sanguine", Side = 1, Icon = "73789337996373" })
+local SecDiamond = PageGlitch:Section({ Name = "Diamond", Side = 2, Icon = "73789337996373" })
+
+SecSanguine:Toggle({ Name="Sanguine Z Boost", Flag="SanguineGlitch", Default=false, 
+    Callback=function(v) multiEnabled = v if not v then multiCharging = false multiChargeStart = 0 end end })
+SecSanguine:Slider({ Name="Puissance", Flag="SanguinePower", Min=100, Max=5000, Default=400, Decimals=50, Suffix=" force",
+    Callback=function(v) multiPower = v end })
+SecSanguine:Slider({ Name="Durée", Flag="SanguineDuration", Min=10, Max=200, Default=90, Decimals=1, Suffix=" cs",
+    Callback=function(v) multiDuration = v/100 end })
+
+SecDiamond:Toggle({ Name="Diamond Glitch", Flag="DiamondGlitch", Default=false, 
+    Callback=function(v) diamondEnabled = v if not v then diamondCharging = false diamondChargeStart = 0 end end })
+SecDiamond:Slider({ Name="Puissance", Flag="DiamondPower", Min=100, Max=5000, Default=400, Decimals=50, Suffix=" force",
+    Callback=function(v) diamondPower = v end })
+SecDiamond:Slider({ Name="Durée", Flag="DiamondDuration", Min=10, Max=200, Default=90, Decimals=1, Suffix=" cs",
+    Callback=function(v) diamondDuration = v/100 end })
+SecDiamond:Slider({ Name="Charge Min", Flag="DiamondCharge", Min=1, Max=50, Default=10, Decimals=1, Suffix="00ms",
+    Callback=function(v) diamondRequiredCharge = v/10 end })
+
+-- PAGE VISUAL
+local PageVisual = Window:Page({ Name = "Visual", Icon = "122669828593160" })
+local SecESP = PageVisual:Section({ Name = "ESP Players", Side = 1, Icon = "122669828593160" })
+local SecESPNPC = PageVisual:Section({ Name = "ESP NPC", Side = 2, Icon = "122669828593160" })
+
+SecESP:Toggle({ Name="ESP Players", Flag="ESPPlayers", Default=false, 
+    Callback=function(v) ESPEnabled = v if ESPEnabled or ESPNPCEnabled then startESP() else stopESP() end end })
+
+SecESP:Toggle({ Name="Box",               Flag="ESPBox",         Default=true,  Callback=function(v) ESPBox = v end })
+SecESP:Toggle({ Name="Corner Box",       Flag="ESPCornerBox",   Default=false, Callback=function(v) ESPCornerBox = v end })
+SecESP:Toggle({ Name="Filled Box",       Flag="ESPFilledBox",   Default=false, Callback=function(v) ESPFilledBox = v end })
+SecESP:Toggle({ Name="Lines",            Flag="ESPLines",       Default=true,  Callback=function(v) ESPLines = v end })
+
+SecESP:Toggle({ Name="Name",             Flag="ESPName",        Default=true,  Callback=function(v) ESPName = v end })
+SecESP:Toggle({ Name="Distance",         Flag="ESPDistance",    Default=true,  Callback=function(v) ESPDistance = v end })
+SecESP:Toggle({ Name="Team",             Flag="ESPTeam",        Default=false, Callback=function(v) ESPTeam = v end })
+SecESP:Toggle({ Name="Bounty",           Flag="ESPBounty",      Default=false, Callback=function(v) ESPBounty = v end })
+SecESP:Toggle({ Name="Weapon",           Flag="ESPWeapon",      Default=false, Callback=function(v) ESPWeapon = v end })
+
+SecESP:Toggle({ Name="Health Bar",       Flag="ESPHealthBar",   Default=true,  Callback=function(v) ESPHealthBar = v end })
+SecESP:Toggle({ Name="Health Number",    Flag="ESPHealthNum",   Default=false, Callback=function(v) ESPHealthNum = v end })
+
+SecESP:Toggle({ Name="Skeleton",         Flag="ESPSkeleton",    Default=false, Callback=function(v) ESPSkeleton = v end })
+SecESP:Toggle({ Name="Head Dot",         Flag="ESPHeadDot",     Default=false, Callback=function(v) ESPHeadDot = v end })
+SecESP:Toggle({ Name="Off-Screen Arrows",Flag="ESPOffScreen",   Default=false, Callback=function(v) ESPOffScreen = v end })
+SecESP:Toggle({ Name="Chams",            Flag="ESPChams",       Default=false, Callback=function(v) ESPChams = v end })
+
+SecESPNPC:Toggle({ Name="ESP NPCs", Flag="ESPNpcs", Default=false, 
+    Callback=function(v) ESPNPCEnabled = v if ESPEnabled or ESPNPCEnabled then startESP() else stopESP() end end })
+
+SecESPNPC:Toggle({ Name="Box",      Flag="ESPNpcBox",    Default=true,  Callback=function(v) ESPNPCBox_v = v end })
+SecESPNPC:Toggle({ Name="Name",     Flag="ESPNpcName",   Default=true,  Callback=function(v) ESPNPCName_v = v end })
+SecESPNPC:Toggle({ Name="Distance", Flag="ESPNpcDist",   Default=true,  Callback=function(v) ESPNPCDist_v = v end })
+SecESPNPC:Toggle({ Name="Health Bar",Flag="ESPNpcHp",    Default=true,  Callback=function(v) ESPNPCHp_v = v end })
+SecESPNPC:Toggle({ Name="Chams",    Flag="ESPNpcChams",  Default=false, Callback=function(v) ESPNPCChams_v = v end })
+
+-- PAGE SETTINGS
+Library:CreateSettingsPage(Window, KeybindList)
+
+-- INIT
+Window:Init()
+
+Library:Notification({
+    Title       = "Nameless Client",
+    Description = "Loaded successfully with nameless_lib! ✅",
+    Duration    = 3,
+    Icon        = "73789337996373"
 })
 
--- Movement avec Fly Exploit V3
-PlayerMoveBox:AddToggle("JumpBoost", {
-    Text = "Jump Boost", Default = false,
-    Callback = function(v) jumpEnabled = v if v then applyJump() else resetJump() end end,
-})
-PlayerMoveBox:AddSlider("JumpPower", {
-    Text = "Jump Power", Default = 100, Min = 50, Max = 500, Rounding = 0,
-    Callback = function(v) jumpPower = v if jumpEnabled then applyJump() end end,
-})
-PlayerMoveBox:AddDivider()
-PlayerMoveBox:AddToggle("SpeedHack", {
-    Text = "Speed Hack", Default = false,
-    Callback = function(v) speedEnabled = v if v then applySpeed() else resetSpeed() end end,
-})
-PlayerMoveBox:AddSlider("SpeedValue", {
-    Text = "Walk Speed", Default = 50, Min = 16, Max = 50000, Rounding = 0,
-    Callback = function(v) speedValue = v if speedEnabled then applySpeed() end end,
-})
-PlayerMoveBox:AddDivider()
-
--- Fly Exploit V3 Integration
-PlayerMoveBox:AddDropdown("FlyMode", {
-    Values = {"CFrame", "Velocity", "Swim", "TP-Fast", "Float", "Tween"}, 
-    Default = 1, 
-    Text = "Fly Mode",
-    Tooltip = "Choisis le mode de fly",
-    Callback = function(v) FlyExploit:SetMode(v) end,
-})
-
-PlayerMoveBox:AddToggle("FlyToggle", {
-    Text = "Enable Fly", Default = false,
-    Tooltip = "W/A/S/D + Space/Shift pour voler",
-    Callback = function(v) FlyExploit:ToggleFly(v) end,
-})
-
-PlayerMoveBox:AddSlider("FlySpeed", {
-    Text = "Fly Speed", Default = 50, Min = 10, Max = 500, Rounding = 0,
-    Callback = function(v) FlyExploit:SetSpeed(v) end,
-})
-
-PlayerMoveBox:AddToggle("NoClip", {
-    Text = "NoClip", Default = false,
-    Tooltip = "Traverse les murs",
-    Callback = function(v) FlyExploit:ToggleNoClip(v) end,
-})
-
-PlayerMoveBox:AddDivider()
-PlayerMoveBox:AddToggle("FlySpin", {
-    Text = "Fly Spin", Default = false,
-    Callback = function(v) flySpinEnabled = v if v then startFlySpin() else stopFlySpin() end end,
-})
-PlayerMoveBox:AddSlider("FlySpinSpeed", {
-    Text = "Spin Speed", Default = 50, Min = 5, Max = 200, Rounding = 0,
-    Callback = function(v) flySpinSpeed = v end,
-})
-
--- =====================================================================
--- TAB GLITCH
--- =====================================================================
-local SanguineBox = Tabs.Glitch:AddLeftGroupbox("Sanguine Glitch")
-local DiamondBox  = Tabs.Glitch:AddRightGroupbox("Diamond Glitch")
-
-SanguineBox:AddToggle("SanguineGlitch", {
-    Text = "Sanguine Z Boost", Default = false,
-    Tooltip = "Détecte GhoulZCharge → propulsion vers ta visée",
-    Callback = function(v) multiEnabled = v if not v then multiCharging = false multiChargeStart = 0 end end,
-})
-SanguineBox:AddSlider("SanguinePower", {
-    Text = "Puissance", Default = 1000, Min = 100, Max = 5000, Rounding = 0, Suffix = " force",
-    Callback = function(v) multiPower = v end,
-})
-SanguineBox:AddSlider("SanguineDuration", {
-    Text = "Durée", Default = 60, Min = 10, Max = 200, Rounding = 0, Suffix = " cs",
-    Callback = function(v) multiDuration = v/100 end,
-})
-
-DiamondBox:AddToggle("DiamondGlitch", {
-    Text = "Diamond Glitch", Default = false,
-    Tooltip = "Détecte CombatZ → propulsion vers ta visée",
-    Callback = function(v) diamondEnabled = v if not v then diamondCharging = false diamondChargeStart = 0 end end,
-})
-DiamondBox:AddSlider("DiamondPower", {
-    Text = "Puissance", Default = 400, Min = 100, Max = 5000, Rounding = 0, Suffix = " force",
-    Callback = function(v) diamondPower = v end,
-})
-DiamondBox:AddSlider("DiamondDuration", {
-    Text = "Durée", Default = 90, Min = 10, Max = 200, Rounding = 0, Suffix = " cs",
-    Callback = function(v) diamondDuration = v/100 end,
-})
-DiamondBox:AddSlider("DiamondCharge", {
-    Text = "Charge Min", Default = 10, Min = 1, Max = 50, Rounding = 0, Suffix = "00ms",
-    Callback = function(v) diamondRequiredCharge = v/10 end,
-})
-
--- =====================================================================
--- TAB VISUAL — ESP
--- =====================================================================
-local ESPPlayersBox = Tabs.Visual:AddLeftGroupbox("ESP Players")
-local ESPNPCBox     = Tabs.Visual:AddRightGroupbox("ESP NPC")
-
-ESPPlayersBox:AddToggle("ESPPlayers", {
-    Text = "ESP Players", Default = false,
-    Callback = function(v) ESPEnabled = v
-        if ESPEnabled or ESPNPCEnabled then startESP() else stopESP() end
-    end,
-})
-ESPPlayersBox:AddDivider()
-ESPPlayersBox:AddToggle("ESPBox",       { Text = "Box",               Default = true,  Callback = function(v) ESPBox       = v end })
-ESPPlayersBox:AddToggle("ESPCornerBox", { Text = "Corner Box",        Default = false, Callback = function(v) ESPCornerBox = v end })
-ESPPlayersBox:AddToggle("ESPFilledBox", { Text = "Filled Box",        Default = false, Callback = function(v) ESPFilledBox = v end })
-ESPPlayersBox:AddToggle("ESPLines",     { Text = "Lines (haut milieu)", Default = true, Callback = function(v) ESPLines    = v end })
-ESPPlayersBox:AddDivider()
-ESPPlayersBox:AddToggle("ESPName",      { Text = "Name",              Default = true,  Callback = function(v) ESPName      = v end })
-ESPPlayersBox:AddToggle("ESPDistance",  { Text = "Distance",          Default = true,  Callback = function(v) ESPDistance  = v end })
-ESPPlayersBox:AddToggle("ESPTeam",      { Text = "Team",              Default = false, Callback = function(v) ESPTeam      = v end })
-ESPPlayersBox:AddToggle("ESPBounty",    { Text = "Bounty",            Default = false, Callback = function(v) ESPBounty    = v end })
-ESPPlayersBox:AddToggle("ESPWeapon",    { Text = "Weapon",            Default = false, Callback = function(v) ESPWeapon    = v end })
-ESPPlayersBox:AddDivider()
-ESPPlayersBox:AddToggle("ESPHealthBar", { Text = "Health Bar",        Default = true,  Callback = function(v) ESPHealthBar = v end })
-ESPPlayersBox:AddToggle("ESPHealthNum", { Text = "Health Number",     Default = false, Callback = function(v) ESPHealthNum = v end })
-ESPPlayersBox:AddDivider()
-ESPPlayersBox:AddToggle("ESPSkeleton",  { Text = "Skeleton",          Default = false, Callback = function(v) ESPSkeleton  = v end })
-ESPPlayersBox:AddToggle("ESPHeadDot",   { Text = "Head Dot",          Default = false, Callback = function(v) ESPHeadDot   = v end })
-ESPPlayersBox:AddToggle("ESPOffScreen", { Text = "Off-Screen Arrows", Default = false, Callback = function(v) ESPOffScreen = v end })
-ESPPlayersBox:AddToggle("ESPChams",     { Text = "Chams",             Default = false, Callback = function(v) ESPChams     = v end })
-
-ESPNPCBox:AddToggle("ESPNPCs", {
-    Text = "ESP NPCs", Default = false,
-    Callback = function(v) ESPNPCEnabled = v
-        if ESPEnabled or ESPNPCEnabled then startESP() else stopESP() end
-    end,
-})
-ESPNPCBox:AddDivider()
-ESPNPCBox:AddToggle("ESPNPCBoxFlag",  { Text = "Box",        Default = true,  Callback = function(v) ESPNPCBox_v   = v end })
-ESPNPCBox:AddToggle("ESPNPCNameFlag", { Text = "Name",       Default = true,  Callback = function(v) ESPNPCName_v  = v end })
-ESPNPCBox:AddToggle("ESPNPCDistFlag", { Text = "Distance",   Default = true,  Callback = function(v) ESPNPCDist_v  = v end })
-ESPNPCBox:AddToggle("ESPNPCHpFlag",   { Text = "Health Bar", Default = true,  Callback = function(v) ESPNPCHp_v    = v end })
-ESPNPCBox:AddToggle("ESPNPCChamsF",   { Text = "Chams",      Default = false, Callback = function(v) ESPNPCChams_v = v end })
-
--- =====================================================================
--- TAB SETTINGS
--- =====================================================================
-local MenuGroup = Tabs.Settings:AddLeftGroupbox("Menu")
-
-MenuGroup:AddLabel("Menu bind"):AddKeyPicker("MenuKeybind", {
-    Default = "RightShift", NoUI = true, Text = "Menu keybind",
-})
-Library.ToggleKeybind = Options.MenuKeybind
-
-ThemeManager:SetLibrary(Library)
-SaveManager:SetLibrary(Library)
-SaveManager:IgnoreThemeSettings()
-SaveManager:SetIgnoreIndexes({ "MenuKeybind" })
-ThemeManager:SetFolder("NamelessClient")
-SaveManager:SetFolder("NamelessClient")
-
-ThemeManager:ApplyToGroupbox(MenuGroup)
-SaveManager:BuildConfigSection(Tabs.Settings)
-SaveManager:LoadAutoloadConfig()
-
-Library:Notify({
-    Title = "Nameless Client",
-    Description = "Chargé avec succès ! Kill Aura V7 + Fly Exploit V3 intégrés ✅",
-    Time = 5,
-})
-
-print("✅ Nameless Client | Obsidian + SA Module + Kill Aura V7 + Fly Exploit V3 | By HimselfZen")
+print("✅ Nameless Client Loaded | Obsidian UI replaced with nameless_lib")
