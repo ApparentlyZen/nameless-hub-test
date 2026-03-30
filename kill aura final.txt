@@ -1,0 +1,159 @@
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local UserInputService = game:GetService("UserInputService")
+local RunService = game:GetService("RunService")
+local LocalPlayer = Players.LocalPlayer
+
+-- === CONFIGURATION & VARIABLES ===
+local settings = { 
+    radius = 10, 
+    strafeSpeed = 0.45, 
+    angle = 0, 
+    selectedPlayer = "Closest",
+    auraMin = 0,
+    auraMax = 1000,
+    spinSpeed = 500
+}
+
+_G.IsCharging = false
+local v104 = tostring(LocalPlayer.UserId):sub(2, 4)
+
+-- === SMART PAUSE (DÉTECTION DES TOUCHES) ===
+local skillKeys = {
+    [Enum.KeyCode.Z] = true, [Enum.KeyCode.X] = true,
+    [Enum.KeyCode.C] = true, [Enum.KeyCode.V] = true, [Enum.KeyCode.F] = true
+}
+UserInputService.InputBegan:Connect(function(i, p) if not p and skillKeys[i.KeyCode] then _G.IsCharging = true end end)
+UserInputService.InputEnded:Connect(function(i, _) if skillKeys[i.KeyCode] then _G.IsCharging = false end end)
+
+-- === LOGIQUE D'ATTAQUE MAX SPEED ===
+local function FastAttack(target)
+    if _G.IsCharging or not target then return end
+    pcall(function()
+        local char = LocalPlayer.Character
+        local tool = char and char:FindFirstChildOfClass("Tool")
+        local Net = ReplicatedStorage:WaitForChild("Modules"):WaitForChild("Net")
+        if tool then
+            local rEvent = tool:FindFirstChild("RemoteEvent")
+            local lClick = tool:FindFirstChild("LeftClickRemote")
+            if rEvent then rEvent:FireServer(false) end
+            if lClick then lClick:FireServer() end
+        end
+        local v106 = v104 .. tostring(coroutine.running()):sub(11, 15)
+        local hitPart = target:FindFirstChild("Head") or target:FindFirstChild("HumanoidRootPart")
+        if hitPart then
+            Net["RE/RegisterAttack"]:FireServer(0)
+            Net["RE/RegisterHit"]:FireServer(hitPart, {}, v106)
+        end
+    end)
+end
+
+-- === INTERFACE PRINCIPALE ===
+local ScreenGui = Instance.new("ScreenGui", game:GetService("CoreGui"))
+ScreenGui.Name = "SapiHubV7_Final"
+
+local Main = Instance.new("Frame", ScreenGui)
+Main.Size = UDim2.new(0, 380, 0, 300)
+Main.Position = UDim2.new(0.5, -190, 0.3, 0)
+Main.BackgroundColor3 = Color3.fromRGB(12, 12, 18)
+Main.BorderSizePixel = 0
+Main.Active = true
+Instance.new("UICorner", Main).CornerRadius = UDim.new(0, 10)
+
+-- BARRE DE TITRE
+local TitleBar = Instance.new("Frame", Main)
+TitleBar.Size = UDim2.new(1, 0, 0, 35)
+TitleBar.BackgroundColor3 = Color3.fromRGB(22, 22, 32)
+Instance.new("UICorner", TitleBar).CornerRadius = UDim.new(0, 10)
+
+local TitleLabel = Instance.new("TextLabel", TitleBar)
+TitleLabel.Size = UDim2.new(1, -40, 1, 0); TitleLabel.Position = UDim2.new(0, 10, 0, 0)
+TitleLabel.Text = "SAPI HUB PREMIUM V7"
+TitleLabel.TextColor3 = Color3.new(1,1,1); TitleLabel.Font = Enum.Font.GothamBold; TitleLabel.TextSize = 14; TitleLabel.BackgroundTransparency = 1; TitleLabel.TextXAlignment = Enum.TextXAlignment.Left
+
+-- BOUTON MINIMISER (-)
+local MinBtn = Instance.new("TextButton", TitleBar)
+MinBtn.Size = UDim2.new(0, 30, 0, 30); MinBtn.Position = UDim2.new(1, -35, 0, 2)
+MinBtn.Text = "-"; MinBtn.TextColor3 = Color3.new(1,1,1); MinBtn.BackgroundColor3 = Color3.fromRGB(40, 40, 60); MinBtn.Font = Enum.Font.GothamBold; MinBtn.TextSize = 18
+Instance.new("UICorner", MinBtn)
+
+local ContentFrame = Instance.new("Frame", Main)
+ContentFrame.Size = UDim2.new(1, 0, 1, -35); ContentFrame.Position = UDim2.new(0, 0, 0, 35); ContentFrame.BackgroundTransparency = 1; ContentFrame.ClipsDescendants = true
+
+local isMinimized = false
+MinBtn.MouseButton1Click:Connect(function()
+    isMinimized = not isMinimized
+    ContentFrame.Visible = not isMinimized
+    Main:TweenSize(isMinimized and UDim2.new(0, 380, 0, 35) or UDim2.new(0, 380, 0, 300), "Out", "Quart", 0.3, true)
+    MinBtn.Text = isMinimized and "+" or "-"
+end)
+
+-- DRAG LOGIC
+local dragging, dragStart, startPos
+TitleBar.InputBegan:Connect(function(i) if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then dragging = true; dragStart = i.Position; startPos = Main.Position end end)
+UserInputService.InputChanged:Connect(function(i) if dragging and (i.UserInputType == Enum.UserInputType.MouseMovement or i.UserInputType == Enum.UserInputType.Touch) then local d = i.Position - dragStart; Main.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + d.X, startPos.Y.Scale, startPos.Y.Offset + d.Y) end end)
+UserInputService.InputEnded:Connect(function(i) if i.UserInputState == Enum.UserInputState.End then dragging = false end end)
+
+-- COLONNES
+local LeftContent = Instance.new("ScrollingFrame", ContentFrame)
+LeftContent.Size = UDim2.new(0.5, -10, 1, -10); LeftContent.Position = UDim2.new(0, 5, 0, 5); LeftContent.BackgroundTransparency = 1; LeftContent.CanvasSize = UDim2.new(0,0,3,0); LeftContent.ScrollBarThickness = 0
+Instance.new("UIListLayout", LeftContent).Padding = UDim.new(0, 5)
+
+local RightContent = Instance.new("ScrollingFrame", ContentFrame)
+RightContent.Size = UDim2.new(0.5, -10, 1, -10); RightContent.Position = UDim2.new(0.5, 5, 0, 5); RightContent.BackgroundTransparency = 1; RightContent.CanvasSize = UDim2.new(0,0,3,0); RightContent.ScrollBarThickness = 0
+Instance.new("UIListLayout", RightContent).Padding = UDim.new(0, 5)
+
+-- === FONCTIONNALITÉS GUI ===
+local function AddTgl(parent, name, color, callback)
+    local b = Instance.new("TextButton", parent); b.Size = UDim2.new(1, 0, 0, 30); b.BackgroundColor3 = Color3.fromRGB(30, 30, 35); b.Text = name.." [OFF]"; b.TextColor3 = Color3.fromRGB(180, 180, 180); b.Font = Enum.Font.GothamSemibold; b.TextSize = 10
+    Instance.new("UICorner", b).CornerRadius = UDim.new(0, 6)
+    local act = false; b.MouseButton1Click:Connect(function() act = not act; b.Text = name..(act and " [ON]" or " [OFF]"); b.BackgroundColor3 = act and color or Color3.fromRGB(30, 30, 35); b.TextColor3 = act and Color3.new(1,1,1) or Color3.fromRGB(180,180,180); callback(act) end)
+end
+
+local function AddSlider(parent, name, min, max, def, callback)
+    local f = Instance.new("Frame", parent); f.Size = UDim2.new(1, 0, 0, 38); f.BackgroundTransparency = 1
+    local l = Instance.new("TextLabel", f); l.Size = UDim2.new(1,0,0,15); l.Text = name.." : "..def; l.TextColor3 = Color3.new(0.7,0.7,0.7); l.Font = Enum.Font.Gotham; l.TextSize = 10; l.BackgroundTransparency = 1
+    local b = Instance.new("Frame", f); b.Size = UDim2.new(1,0,0,4); b.Position = UDim2.new(0,0,0.7,0); b.BackgroundColor3 = Color3.fromRGB(40,40,45)
+    local fi = Instance.new("Frame", b); fi.Size = UDim2.new((def-min)/(max-min), 0, 1, 0); fi.BackgroundColor3 = Color3.fromRGB(100, 100, 255)
+    f.InputBegan:Connect(function(i) if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then local m = UserInputService.InputChanged:Connect(function(i) if i.UserInputType == Enum.UserInputType.MouseMovement or i.UserInputType == Enum.UserInputType.Touch then local p = math.clamp((i.Position.X - b.AbsolutePosition.X) / b.AbsoluteSize.X, 0, 1); fi.Size = UDim2.new(p,0,1,0); local v = math.floor(min + (max - min) * p); l.Text = name.." : "..v; callback(v) end end) i.Changed:Connect(function() if i.UserInputState == Enum.UserInputState.End then m:Disconnect() end end) end end)
+end
+
+-- SELECTION CIBLE (V7 Style)
+local TargetZone = Instance.new("Frame", LeftContent); TargetZone.Size = UDim2.new(1, 0, 0, 30); TargetZone.BackgroundTransparency = 1
+local DBtn = Instance.new("TextButton", TargetZone); DBtn.Size = UDim2.new(0.75, -5, 1, 0); DBtn.Text = "Cible: Closest"; DBtn.BackgroundColor3 = Color3.fromRGB(40,40,50); DBtn.TextColor3 = Color3.new(1,1,1); DBtn.Font = Enum.Font.GothamBold; DBtn.TextSize = 9; Instance.new("UICorner", DBtn)
+local RefreshBtn = Instance.new("TextButton", TargetZone); RefreshBtn.Size = UDim2.new(0.25, 0, 1, 0); RefreshBtn.Position = UDim2.new(0.75, 0, 0, 0); RefreshBtn.Text = "Ref"; RefreshBtn.BackgroundColor3 = Color3.fromRGB(50,150,50); RefreshBtn.TextColor3 = Color3.new(1,1,1); RefreshBtn.Font = Enum.Font.GothamBold; RefreshBtn.TextSize = 9; Instance.new("UICorner", RefreshBtn)
+
+local DScroll = Instance.new("ScrollingFrame", LeftContent); DScroll.Size = UDim2.new(1,0,0,80); DScroll.Visible = false; DScroll.BackgroundColor3 = Color3.fromRGB(20,20,25); Instance.new("UIListLayout", DScroll)
+DBtn.MouseButton1Click:Connect(function() DScroll.Visible = not DScroll.Visible end)
+
+local function UpdatePlayerList()
+    for _,v in pairs(DScroll:GetChildren()) do if v:IsA("TextButton") then v:Destroy() end end
+    local function createBtn(n, d)
+        local b = Instance.new("TextButton", DScroll); b.Size = UDim2.new(1,0,0,22); b.Text = d; b.BackgroundColor3 = Color3.fromRGB(30,30,40); b.TextColor3 = Color3.new(1,1,1); b.TextSize = 9
+        b.MouseButton1Click:Connect(function() settings.selectedPlayer = n; DBtn.Text = "Cible: "..d; DScroll.Visible = false end)
+    end
+    createBtn("Closest", "Closest")
+    for _,p in pairs(Players:GetPlayers()) do if p ~= LocalPlayer then createBtn(p.Name, p.DisplayName) end end
+end
+UpdatePlayerList()
+RefreshBtn.MouseButton1Click:Connect(UpdatePlayerList)
+
+-- === COMBAT FEATURES (GAUCHE) ===
+AddTgl(LeftContent, "Kill Aura NPC", Color3.fromRGB(180, 45, 45), function(v) _G.KA_NPC = v; task.spawn(function() while _G.KA_NPC do local hrp = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart") if hrp then for _,n in pairs(workspace.Enemies:GetChildren()) do if n:FindFirstChild("HumanoidRootPart") then local d = (n.HumanoidRootPart.Position - hrp.Position).Magnitude; if d >= settings.auraMin and d <= settings.auraMax then FastAttack(n) end end end end task.wait() end end) end)
+AddTgl(LeftContent, "Kill Aura Player", Color3.fromRGB(45, 45, 180), function(v) _G.KA_PLR = v; task.spawn(function() while _G.KA_PLR do local hrp = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart") if hrp then for _,p in pairs(Players:GetPlayers()) do if p ~= LocalPlayer and p.Character and p.Character:FindFirstChild("HumanoidRootPart") then local d = (p.Character.HumanoidRootPart.Position - hrp.Position).Magnitude; if d >= settings.auraMin and d <= settings.auraMax then FastAttack(p.Character) end end end end task.wait() end end) end)
+
+AddTgl(LeftContent, "Strafe NPC", Color3.fromRGB(180, 45, 45), function(v) _G.S_NPC = v; task.spawn(function() while _G.S_NPC do local hrp = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart"); local t = nil; local dmin = 1000; if hrp then for _,n in pairs(workspace.Enemies:GetChildren()) do if n:FindFirstChild("HumanoidRootPart") and n.Humanoid.Health > 0 then local d = (n.HumanoidRootPart.Position-hrp.Position).Magnitude; if d < dmin then dmin = d; t = n.HumanoidRootPart end end end if t then settings.angle = settings.angle + (settings.strafeSpeed/10); hrp.CFrame = CFrame.new(t.Position + Vector3.new(math.cos(settings.angle)*settings.radius, 4, math.sin(settings.angle)*settings.radius), t.Position); FastAttack(t.Parent) end end task.wait() end end) end)
+
+AddTgl(LeftContent, "Strafe Player", Color3.fromRGB(45, 45, 180), function(v) _G.S_PLR = v; task.spawn(function() while _G.S_PLR do local hrp = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart"); local t = nil; if hrp then if settings.selectedPlayer == "Closest" then local dmin = 1000; for _,p in pairs(Players:GetPlayers()) do if p ~= LocalPlayer and p.Character and p.Character:FindFirstChild("HumanoidRootPart") and p.Character.Humanoid.Health > 0 then local d = (p.Character.HumanoidRootPart.Position-hrp.Position).Magnitude; if d < dmin then dmin = d; t = p.Character.HumanoidRootPart end end end else local p = Players:FindFirstChild(settings.selectedPlayer); if p and p.Character and p.Character:FindFirstChild("HumanoidRootPart") and p.Character.Humanoid.Health > 0 then t = p.Character.HumanoidRootPart end end if t then settings.angle = settings.angle + (settings.strafeSpeed/10); hrp.CFrame = CFrame.new(t.Position + Vector3.new(math.cos(settings.angle)*settings.radius, 4, math.sin(settings.angle)*settings.radius), t.Position); FastAttack(t.Parent) end end task.wait() end end) end)
+
+-- === RÉGLAGES (DROITE) ===
+AddSlider(RightContent, "Distance Strafe", 1, 100, 10, function(v) settings.radius = v end)
+AddSlider(RightContent, "Vitesse Strafe", 1, 2000, 45, function(v) settings.strafeSpeed = v / 100 end)
+AddSlider(RightContent, "Aura Max Range", 10, 500, 20000, function(v) settings.auraMax = v end)
+AddSlider(RightContent, "Vitesse Spin", 1, 15000, 500, function(v) settings.spinSpeed = v end)
+
+AddTgl(RightContent, "Spin Bot", Color3.fromRGB(150, 45, 180), function(v) 
+    _G.SpinBot = v
+    if LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("Humanoid") then LocalPlayer.Character.Humanoid.AutoRotate = not v end
+    task.spawn(function() while _G.SpinBot do local hrp = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart") if hrp then hrp.CFrame = hrp.CFrame * CFrame.Angles(0, math.rad(settings.spinSpeed), 0) end RunService.Heartbeat:Wait() end end) 
+end)
