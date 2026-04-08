@@ -89,6 +89,17 @@ local SA = (function()
     local maxRange       = 1000
     local predAmt        = 0.1
     local Selected       = nil
+    local saType         = "360"
+    local fovMode        = "Static"
+    local fovSize        = 100
+    local fovVisible     = false
+    local fovColor       = Color3.new(1, 1, 1)
+
+    local fovCircle = Drawing.new("Circle")
+    fovCircle.Thickness = 1
+    fovCircle.NumSides = 64
+    fovCircle.Color = Color3.new(1, 1, 1)
+    fovCircle.Visible = false -- Default state
     local zSkillActive   = false
 
     local renderConn   = nil
@@ -162,6 +173,19 @@ local SA = (function()
         return hrp.Position + hrp.Velocity * predAmt
     end
 
+    local function checkFilters(hrp, lpHRP)
+        if saType == "180" then
+            local dot = lpHRP.CFrame.LookVector:Dot((hrp.Position - lpHRP.Position).Unit)
+            if dot < 0 then return false end
+        elseif saType == "FOV" then
+            local pos, onScreen = cam:WorldToViewportPoint(hrp.Position)
+            if not onScreen then return false end
+            local center = fovMode == "Static" and Vector2.new(cam.ViewportSize.X/2, cam.ViewportSize.Y/2) or UserInputService:GetMouseLocation()
+            if (Vector2.new(pos.X, pos.Y) - center).Magnitude > fovSize then return false end
+        end
+        return true
+    end
+
     local function closestPlayer(lpHRP)
         if not lpHRP then return nil end
         if Selected and Selected.Character and getHRP(Selected.Character) then return Selected end
@@ -171,6 +195,7 @@ local SA = (function()
                 local hum = pl.Character:FindFirstChildOfClass("Humanoid")
                 local hrp = getHRP(pl.Character)
                 if hum and hum.Health > 0 and hrp then
+                    if not checkFilters(hrp, lpHRP) then continue end
                     local d = (hrp.Position - lpHRP.Position).Magnitude
                     if d <= maxRange and d < bd then bd = d best = pl end
                 end
@@ -188,6 +213,7 @@ local SA = (function()
                 local hum = npc:FindFirstChildOfClass("Humanoid")
                 local hrp = getHRP(npc)
                 if hum and hum.Health > 0 and hrp then
+                    if not checkFilters(hrp, lpHRP) then continue end
                     local d = (hrp.Position - lpHRP.Position).Magnitude
                     if d <= maxRange and d < bd then bd = d best = npc end
                 end
@@ -224,25 +250,43 @@ local SA = (function()
     local function startLoop()
         if renderConn then return end
         renderConn = RunService.Heartbeat:Connect(function()
+            -- Reset des positions à chaque frame pour éviter le ghosting
+            PlPos = nil
+            NPCPos = nil
+
+            -- Gestion de l'affichage du cercle FOV (Indépendant du ciblage actif)
+            if fovVisible and saType == "FOV" then
+                fovCircle.Visible = true
+                fovCircle.Radius = fovSize
+                fovCircle.Position = fovMode == "Static" and Vector2.new(cam.ViewportSize.X/2, cam.ViewportSize.Y/2) or UserInputService:GetMouseLocation()
+                fovCircle.Color = fovColor
+            else
+                fovCircle.Visible = false
+            end
+
+            -- Si aucun mode de Silent Aim n'est actif, on s'arrête là pour cette frame
             if not SAPlayersOn and not SANPCsOn then return end
-            if not zSkillActive then return end
+            
             local char  = lp.Character
             local lpHRP = char and getHRP(char)
             if not lpHRP then return end
+
             if SAPlayersOn then
                 local t = closestPlayer(lpHRP)
                 if t and t.Character then
-                    local hrp = getHRP(t.Character)
-                    if hrp then PlPos = predicted(hrp) applyHL(t.Character, "Player") end
-                else PlPos = nil if curTgtType == "Player" then clearHL() end end
-            else PlPos = nil end
+                    PlPos = predicted(getHRP(t.Character))
+                    applyHL(t.Character, "Player")
+                else if curTgtType == "Player" then clearHL() end end -- Clear highlight if player target lost
+            end
+
             if SANPCsOn and not PlPos then
                 local n = closestNPC(lpHRP)
                 if n then
-                    local hrp = getHRP(n)
-                    if hrp then NPCPos = predicted(hrp) applyHL(n, "NPC") end
-                else NPCPos = nil if curTgtType == "NPC" then clearHL() end end
-            else if not SAPlayersOn then NPCPos = nil end end
+                    NPCPos = predicted(getHRP(n))
+                    applyHL(n, "NPC")
+                else if not SAPlayersOn then clearHL() end end -- Clear highlight if NPC target lost and no player target
+            end
+
             local tgt = PlPos and CFrame.new(PlPos) or NPCPos and CFrame.new(NPCPos)
             if tgt and MouseMod then
                 local ok, md = pcall(require, MouseMod)
@@ -499,6 +543,11 @@ local SA = (function()
             MiniNCreated = true
         elseif MiniNCreated and MiniNGui then MiniNGui.Enabled = v end
     end
+    function M:SetSAType(v) saType = v end
+    function M:SetFOVMode(v) fovMode = v end
+    function M:SetFOVSize(v) fovSize = v end
+    function M:SetFOVVisible(v) fovVisible = v if v then startLoop() end end
+    function M:SetFOVColor(v) fovColor = v end
 
     return M
 end)()
@@ -1601,6 +1650,31 @@ SecSAGlobal:AddLabel("DistanceSilent"):AddSlider({
     Default  = 500,
     Callback = function(v) SA:SetDistanceLimit(v) end
 })
+SecSAGlobal:AddLabel("Silent Aim Mode"):AddDropdown({
+    Values   = { "360", "180", "FOV" },
+    Default  = "360",
+    Callback = function(v) SA:SetSAType(v) end
+})
+SecSAGlobal:AddLabel("FOV Mode"):AddDropdown({
+    Values   = { "Static", "Follow Mouse" },
+    Default  = "Static",
+    Callback = function(v) SA:SetFOVMode(v) end
+})
+SecSAGlobal:AddLabel("FOV Size"):AddSlider({
+    Min      = 30,
+    Max      = 500,
+    Default  = 100,
+    Callback = function(v) SA:SetFOVSize(v) end
+})
+SecSAGlobal:AddLabel("Show FOV Circle"):AddToggle({
+    Flag     = "SAShowFOV",
+    Default  = false,
+    Callback = function(v) SA:SetFOVVisible(v) end
+})
+SecSAGlobal:AddLabel("FOV Color"):AddColorPicker({
+    Default  = Color3.new(1, 1, 1),
+    Callback = function(v) SA:SetFOVColor(v) end
+})
 
 local SALockDrop = SecSAGlobal:AddLabel("Lock On Player"):AddDropdown({
     Values   = GetPlayerList(),
@@ -1642,10 +1716,10 @@ local SoruLockDrop = SecSoru:AddLabel("Lock Player"):AddDropdown({
 })
 
 -- ─── Kill Aura ───────────────────────────────────────────────────────
-local KillAuraTab = Window:AddTab({ Name="Kill Aura", Icon="crosshairs", Type="Single" })
-local SecKA = KillAuraTab:AddSection({ Name="Kill Aura Hubs", Icon="crosshairs", Position="Left" })
+local KillAuraTab = Window:AddTab({ Name="Kill Aura", Icon="crosshairs", Type="Double" })
 
-SecKA:AddLabel("Kill Aura (Zen)"):AddToggle({
+local SecKA_Zen = KillAuraTab:AddSection({ Name="Zen Aura", Icon="crosshairs", Position="Left" })
+SecKA_Zen:AddLabel("Kill Aura (Zen)"):AddToggle({
     Flag     = "KAToggle_Zen",
     Default  = false,
     Callback = function(v)
@@ -1653,7 +1727,7 @@ SecKA:AddLabel("Kill Aura (Zen)"):AddToggle({
         KA_Zen:Toggle(v)
     end
 })
-SecKA:AddLabel("Keybind KA Zen"):AddKeybind({
+SecKA_Zen:AddLabel("Keybind KA Zen"):AddKeybind({
     Flag     = "KA_Key_Zen",
     Callback = function()
         state.ka_zen = not state.ka_zen
@@ -1662,9 +1736,8 @@ SecKA:AddLabel("Keybind KA Zen"):AddKeybind({
     end
 })
 
-SecKA:AddLabel("") -- Espace de séparation
-
-SecKA:AddLabel("Kill Aura V2"):AddToggle({
+local SecKA_V2 = KillAuraTab:AddSection({ Name="V2 Aura", Icon="crosshairs", Position="Right" })
+SecKA_V2:AddLabel("Kill Aura V2"):AddToggle({
     Flag     = "KAToggle_V2",
     Default  = false,
     Callback = function(v)
@@ -1672,7 +1745,7 @@ SecKA:AddLabel("Kill Aura V2"):AddToggle({
         KA_V2:Toggle(v)
     end
 })
-SecKA:AddLabel("Keybind KA V2"):AddKeybind({
+SecKA_V2:AddLabel("Keybind KA V2"):AddKeybind({
     Flag     = "KA_Key_V2",
     Callback = function()
         state.ka_v2 = not state.ka_v2
@@ -1681,9 +1754,8 @@ SecKA:AddLabel("Keybind KA V2"):AddKeybind({
     end
 })
 
-SecKA:AddLabel("") -- Espace de séparation
-
-SecKA:AddLabel("Kill Aura CF500 V3"):AddToggle({
+local SecKA_CF = KillAuraTab:AddSection({ Name="CF500 Aura", Icon="crosshairs", Position="Left" })
+SecKA_CF:AddLabel("Kill Aura CF500 V3"):AddToggle({
     Flag     = "KAToggle_CF500",
     Default  = false,
     Callback = function(v)
@@ -1691,7 +1763,7 @@ SecKA:AddLabel("Kill Aura CF500 V3"):AddToggle({
         KA_CF500:Toggle(v)
     end
 })
-SecKA:AddLabel("Keybind CF500"):AddKeybind({
+SecKA_CF:AddLabel("Keybind CF500"):AddKeybind({
     Flag     = "KA_Key_CF500",
     Callback = function()
         state.ka_cf500 = not state.ka_cf500
@@ -1700,9 +1772,8 @@ SecKA:AddLabel("Keybind CF500"):AddKeybind({
     end
 })
 
-SecKA:AddLabel("") -- Espace
-
-SecKA:AddLabel("Gun Kill Aura"):AddToggle({
+local SecKA_Misc = KillAuraTab:AddSection({ Name="Misc Auras", Icon="crosshairs", Position="Right" })
+SecKA_Misc:AddLabel("Gun Kill Aura"):AddToggle({
     Flag     = "KAGunToggle",
     Default  = false,
     Callback = function(v)
@@ -1710,7 +1781,7 @@ SecKA:AddLabel("Gun Kill Aura"):AddToggle({
         KA_Gun:Toggle(v)
     end
 })
-SecKA:AddLabel("Keybind Gun KA"):AddKeybind({
+SecKA_Misc:AddLabel("Keybind Gun KA"):AddKeybind({
     Flag     = "KA_Key_Gun",
     Callback = function()
         state.ka_gun = not state.ka_gun
@@ -1718,15 +1789,13 @@ SecKA:AddLabel("Keybind Gun KA"):AddKeybind({
         if NeverLose.Flags["KAGunToggle"] then NeverLose.Flags["KAGunToggle"]:SetValue(state.ka_gun) end
     end
 })
-SecKA:AddLabel("Gun Target Mode"):AddDropdown({
+SecKA_Misc:AddLabel("Gun Target Mode"):AddDropdown({
     Values   = { "NPCs", "Players", "Both" },
     Default  = "NPCs",
     Callback = function(v) KA_Gun:SetTarget(v) end
 })
 
-SecKA:AddLabel("") -- Espace
-
-SecKA:AddLabel("Fruit Kill Aura"):AddToggle({
+SecKA_Misc:AddLabel("Fruit Kill Aura"):AddToggle({
     Flag     = "KAFruitToggle",
     Default  = false,
     Callback = function(v)
@@ -1734,7 +1803,7 @@ SecKA:AddLabel("Fruit Kill Aura"):AddToggle({
         KA_Fruit:Toggle(v)
     end
 })
-SecKA:AddLabel("Keybind Fruit KA"):AddKeybind({
+SecKA_Misc:AddLabel("Keybind Fruit KA"):AddKeybind({
     Flag     = "KA_Key_Fruit",
     Callback = function()
         state.ka_fruit = not state.ka_fruit
@@ -1742,13 +1811,11 @@ SecKA:AddLabel("Keybind Fruit KA"):AddKeybind({
         if NeverLose.Flags["KAFruitToggle"] then NeverLose.Flags["KAFruitToggle"]:SetValue(state.ka_fruit) end
     end
 })
-SecKA:AddLabel("Fruit Target Mode"):AddDropdown({
+SecKA_Misc:AddLabel("Fruit Target Mode"):AddDropdown({
     Values   = { "NPCs", "Players", "Both" },
     Default  = "Both",
     Callback = function(v) KA_Fruit:SetTarget(v) end
 })
-
-SecKA:AddLabel("") -- Espace
 
 -- =====================================================================
 -- TAB PLAYER ── Fly · Speed · Jump · Spin · Fake Items
