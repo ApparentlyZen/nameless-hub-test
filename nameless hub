@@ -1057,6 +1057,32 @@ end)
 local CurrentTarget    = nil
 local SoruSelectedPlayer = nil
 getgenv().SoruAutoAim = false
+local soruType = "360"
+local soruFovSize = 100
+local soruFovMode = "Static"
+local soruFovVisible = false
+local soruFovColor = Color3.new(1, 1, 1)
+local soruDistLimit = 300
+
+local soruCircle = Drawing.new("Circle")
+soruCircle.Thickness = 1
+soruCircle.NumSides = 64
+soruCircle.Color = Color3.new(1, 1, 1)
+soruCircle.Filled = false
+soruCircle.Visible = false
+
+local function checkSoruFilters(hrp, lpHRP)
+    if soruType == "180" then
+        local dot = lpHRP.CFrame.LookVector:Dot((hrp.Position - lpHRP.Position).Unit)
+        if dot < 0 then return false end
+    elseif soruType == "FOV" then
+        local pos, onScreen = camera:WorldToViewportPoint(hrp.Position)
+        if not onScreen then return false end
+        local center = soruFovMode == "Static" and Vector2.new(camera.ViewportSize.X/2, camera.ViewportSize.Y/2) or UserInputService:GetMouseLocation()
+        if (Vector2.new(pos.X, pos.Y) - center).Magnitude > soruFovSize then return false end
+    end
+    return true
+end
 
 local function isSoruAlly(tp)
     local g = player:FindFirstChild("PlayerGui") if not g then return false end
@@ -1082,18 +1108,30 @@ end
 task.spawn(function()
     while true do
         task.wait(0.1)
+        
+        if soruFovVisible and soruType == "FOV" then
+            soruCircle.Visible = true
+            soruCircle.Radius = soruFovSize
+            soruCircle.Position = soruFovMode == "Static" and Vector2.new(camera.ViewportSize.X/2, camera.ViewportSize.Y/2) or UserInputService:GetMouseLocation()
+            soruCircle.Color = soruFovColor
+        else
+            soruCircle.Visible = false
+        end
+
         if getgenv().SoruAutoAim then
             if SoruSelectedPlayer and SoruSelectedPlayer.Character and SoruSelectedPlayer.Character:FindFirstChild("HumanoidRootPart") then
                 CurrentTarget = SoruSelectedPlayer.Character.HumanoidRootPart
             else
-                local closest, sd = nil, 300
+                local closest, sd = nil, soruDistLimit
                 local myPart = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
                 if myPart then
                     for _, v in pairs(Players:GetPlayers()) do
                         if v ~= player and isSoruEnemy(v) and v.Character and v.Character:FindFirstChild("HumanoidRootPart") then
                             local root = v.Character.HumanoidRootPart
-                            local dist = (root.Position - myPart.Position).Magnitude
-                            if dist < sd then sd = dist closest = root end
+                            if checkSoruFilters(root, myPart) then
+                                local dist = (root.Position - myPart.Position).Magnitude
+                                if dist < sd then sd = dist closest = root end
+                            end
                         end
                     end
                 end
@@ -1711,6 +1749,38 @@ SecSoru:AddLabel("Keybind Soru"):AddKeybind({
             NeverLose.Flags["SoruOn"]:SetValue(state.soru)
         end
     end
+})
+
+SecSoru:AddLabel("Soru Aim Mode"):AddDropdown({
+    Values   = { "360", "180", "FOV" },
+    Default  = "360",
+    Callback = function(v) soruType = v end
+})
+SecSoru:AddLabel("Soru Distance"):AddSlider({
+    Min      = 50,
+    Max      = 2000,
+    Default  = 300,
+    Callback = function(v) soruDistLimit = v end
+})
+SecSoru:AddLabel("FOV Mode"):AddDropdown({
+    Values   = { "Static", "Follow Mouse" },
+    Default  = "Static",
+    Callback = function(v) soruFovMode = v end
+})
+SecSoru:AddLabel("FOV Size"):AddSlider({
+    Min      = 30,
+    Max      = 500,
+    Default  = 100,
+    Callback = function(v) soruFovSize = v end
+})
+SecSoru:AddLabel("Show FOV Circle"):AddToggle({
+    Flag     = "SoruShowFOV",
+    Default  = false,
+    Callback = function(v) soruFovVisible = v end
+})
+SecSoru:AddLabel("FOV Color"):AddColorPicker({
+    Default  = Color3.new(1, 1, 1),
+    Callback = function(v) soruFovColor = v end
 })
 
 local SoruLockDrop = SecSoru:AddLabel("Lock Player"):AddDropdown({
