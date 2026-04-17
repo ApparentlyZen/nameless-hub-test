@@ -99,8 +99,8 @@ local SA = (function()
     fovCircle.Thickness = 1
     fovCircle.NumSides = 64
     fovCircle.Color = Color3.new(1, 1, 1)
+    fovCircle.Filled = false
     fovCircle.Visible = false -- Default state
-    local zSkillActive   = false
 
     local renderConn   = nil
     local curHighlight = nil
@@ -131,6 +131,12 @@ local SA = (function()
     local MiniPState, MiniNState = nil, nil
 
     local function getHRP(m) return m and m:FindFirstChild("HumanoidRootPart") end
+
+    local function isNotValidCondition()
+        if not curTool then return false end
+        local n = curTool.Name:lower()
+        return n:find("portal") or n:find("lightning")
+    end
 
     local function clearConns()
         for _, c in ipairs(charConns) do pcall(function() c:Disconnect() end) end
@@ -289,8 +295,10 @@ local SA = (function()
 
             local tgt = PlPos and CFrame.new(PlPos) or NPCPos and CFrame.new(NPCPos)
             if tgt and MouseMod then
-                local ok, md = pcall(require, MouseMod)
-                if ok and type(md) == "table" then md.Hit = tgt md.Target = nil end
+                if not isNotValidCondition() then
+                    local ok, md = pcall(require, MouseMod)
+                    if ok and type(md) == "table" then md.Hit = tgt md.Target = nil end
+                end
             end
         end)
     end
@@ -395,21 +403,33 @@ local SA = (function()
         getgenv().NamelessHooked = true
         local old
         old = hookmetamethod(game, "__namecall", function(self, ...)
-            local method = getnamecallmethod()
+            local method = getnamecallmethod():lower()
             local args   = { ... }
-            if method == "InvokeServer" or method == "FireServer" then
+            if method == "invokeserver" or method == "fireserver" then
                 local a1 = args[1]
+
+                -- ✅ WHITELIST TAP — L'action M1 de Portal/Lightning n'est jamais redirigée
+                if typeof(a1) == "string" and a1:upper() == "TAP" then return old(self, ...) end
+
+                -- Redirection si le premier argument est un Vector3 (M1 classiques ou skills directionnels)
+                if typeof(a1) == "Vector3" and (SAPlayersOn or SANPCsOn) then
+                    local targetPos = PlPos or NPCPos
+                    if targetPos then return old(self, targetPos, table.unpack(args, 2)) end
+                end
+
                 if typeof(a1) == "string" then
                     local up = a1:upper()
-                    if up == "Z" or up == "X" or up == "C" or up == "V" or up == "F" then
-                        zSkillActive = true
-                        if ZSkillsOn and (PlPos or NPCPos) then
-                            local targetPos = PlPos or NPCPos
-                            task.delay(1, function() zSkillActive = false end)
-                            return old(self, up, targetPos, ...)
+                    -- Redirection des skills Blox Fruits (Z, X, C, V, F)
+                    if (up == "Z" or up == "X" or up == "C" or up == "V" or up == "F") and ZSkillsOn and (PlPos or NPCPos) then
+                        local targetPos = PlPos or NPCPos
+                        for i, arg in ipairs(args) do
+                            if typeof(arg) == "Vector3" then
+                                args[i] = targetPos
+                                return old(self, table.unpack(args))
+                            end
                         end
-                        task.delay(1, function() zSkillActive = false end)
                     end
+
                     if up == "Z" and curTool then
                         if curTool.Name == "Godhuman"           then godZ   = true end
                         if curTool.Name == "Shark Anchor"       then sharkZ = true end
@@ -485,7 +505,7 @@ local SA = (function()
 
     local function onCharAdded(char)
         clearConns() sharkZ = false doughV = false cursedZ = false
-        godZ = false aimOn = false rightTouch = false zSkillActive = false restoreSA()
+        godZ = false aimOn = false rightTouch = false restoreSA()
         for _, c in ipairs(char:GetChildren()) do if c:IsA("Tool") then hookTool(c) end end
         table.insert(charConns, char.ChildAdded:Connect(function(c) if c:IsA("Tool") then hookTool(c) end end))
         table.insert(charConns, char.ChildRemoved:Connect(function(c)
@@ -1086,8 +1106,8 @@ end)
 local oldNamecall
 oldNamecall = hookmetamethod(game, "__namecall", function(self, V1, V2, ...)
     local method = getnamecallmethod():lower()
-    if method == "fireserver" or method == "invokeserver" then
-        if V1 == "TAP" then return oldNamecall(self, V1, V2, ...) end
+    if (method == "fireserver" or method == "invokeserver") then -- Parenthèses ajoutées pour clarté, pas de changement fonctionnel
+        if V1 == "TAP" then return oldNamecall(self, V1, V2, ...) end -- Whitelist Portal/M1 logic
         if getgenv().SoruAutoAim and CurrentTarget then
             local m2 = getnamecallmethod()
             if m2 == "InvokeServer" and self.Parent and tostring(self.Parent) == "Humanoid" then
@@ -1486,19 +1506,6 @@ end
 
 -- =====================================================================
 -- WATERMARK + PING
--- =====================================================================
-local Watermark = Window:Watermark()
-Watermark:AddBlock("chart-four-vertical-bars", "Nameless Client")
-local PingBlock = Watermark:AddBlock("arrow-spin-clockwise", "0MS")
-task.spawn(function()
-    while true do
-        local ok, ping = pcall(function()
-            return math.floor(game:GetService("Stats").Network.ServerStatsItem["Data Ping"]:GetValue())
-        end)
-        PingBlock:SetText((ok and ping or 0) .. "MS") task.wait(1)
-    end
-end)
-
 -- =====================================================================
 -- ══════════════════════════════════════════════════════════
 --    SECTION UI — TABS ET SECTIONS AVEC KEYBINDS NATIFS
