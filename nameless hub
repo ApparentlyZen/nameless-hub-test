@@ -1667,7 +1667,7 @@ SecLegitM1:AddLabel("Keybind M1 Magnet"):AddKeybind({
 })
 SecLegitM1:AddLabel("Magnet Range"):AddSlider({
     Min      = 10,
-    Max      = 20000,
+    Max      = 100,
     Default  = 100,
     Callback = function(v) M1Magnet:SetRange(v) end
 })
