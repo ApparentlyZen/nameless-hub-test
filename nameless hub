@@ -60,6 +60,7 @@ local state = {
     ka_fruit    = false,
     m1_magnet   = false,
     inf_soru    = false,
+    oneshot     = false,
 }
 
 -- =====================================================================
@@ -876,7 +877,7 @@ end)()
 local M1Magnet = (function()
     local M = {}
     local active = false
-    local MAX_RANGE = 20000
+    local magnetRange = 100
     local Net = RS:WaitForChild("Modules"):WaitForChild("Net")
     local RegisterHit = Net["RE/RegisterHit"]
     local RegisterAttack = Net["RE/RegisterAttack"]
@@ -884,7 +885,7 @@ local M1Magnet = (function()
     local function GetTarget()
         local hrp = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
         if not hrp then return nil end
-        local target, dmin = nil, MAX_RANGE
+        local target, dmin = nil, magnetRange
         local targets = {workspace:FindFirstChild("Enemies"), workspace:FindFirstChild("Characters")}
         for _, folder in pairs(targets) do
             if folder then
@@ -902,6 +903,7 @@ local M1Magnet = (function()
     end
 
     function M:Toggle(v) active = v end
+    function M:SetRange(v) magnetRange = v end
 
     UserInputService.InputBegan:Connect(function(input, processed)
         if processed or not active then return end
@@ -1579,6 +1581,12 @@ SecLegitM1:AddLabel("Keybind M1 Magnet"):AddKeybind({
         if NeverLose.Flags["M1Magnet"] then NeverLose.Flags["M1Magnet"]:SetValue(state.m1_magnet) end
     end
 })
+SecLegitM1:AddLabel("Magnet Range"):AddSlider({
+    Min      = 10,
+    Max      = 20000,
+    Default  = 100,
+    Callback = function(v) M1Magnet:SetRange(v) end
+})
 
 -- Infinite Soru Section
 local SecLegitSoru = LegitTab:AddSection({ Name="Infinite Soru(risk)", Icon="zap", Position="Right" })
@@ -1892,6 +1900,39 @@ SecKA_Misc:AddLabel("Fruit Target Mode"):AddDropdown({
     Values   = { "NPCs", "Players", "Both" },
     Default  = "Both",
     Callback = function(v) KA_Fruit:SetTarget(v) end
+})
+
+SecKA_Misc:AddLabel("One Shot Exploit"):AddToggle({
+    Flag     = "OneShot",
+    Default  = false,
+    Callback = function(v)
+        state.oneshot = v
+        if v then
+            task.spawn(function()
+                while state.oneshot do
+                    local char = player.Character
+                    local hrp = char and char:FindFirstChild("HumanoidRootPart")
+                    local hum = char and char:FindFirstChildOfClass("Humanoid")
+
+                    if char and hrp and hum then
+                        -- Sécurité : Désactivation automatique si la santé est inférieure à 20%
+                        if hum.MaxHealth > 0 and (hum.Health / hum.MaxHealth) <= 0.2 then
+                            state.oneshot = false
+                            if NeverLose.Flags["OneShot"] then
+                                NeverLose.Flags["OneShot"]:SetValue(false)
+                            end
+                            break
+                        end
+
+                        -- Logique de One Shot par glitch de position (Y-axis)
+                        local pos = hrp.Position
+                        hrp.CFrame = CFrame.new(pos.X, pos.Y - 795679695796326795679695796326, pos.Z)
+                    end
+                    task.wait(0.01)
+                end
+            end)
+        end
+    end
 })
 
 -- =====================================================================
