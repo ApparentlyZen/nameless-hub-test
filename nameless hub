@@ -970,6 +970,90 @@ local InfiniteSoru = (function()
     return M
 end)()
 
+-- 8. ONE SHOT (from oneshot.txt)
+local OneShot = (function()
+    local M = {}
+    local sg, frame, overlay, active = nil, nil, nil, false
+    local loopTask = nil
+
+    function M:Create()
+        if sg then return end
+        sg = Instance.new("ScreenGui", game:GetService("CoreGui"))
+        sg.Name = "OneShotUI" sg.ResetOnSpawn = false sg.Enabled = false
+
+        frame = Instance.new("Frame", sg)
+        frame.Size = UDim2.new(0, 140, 0, 55)
+        frame.Position = UDim2.new(0.1, 0, 0.7, 0)
+        frame.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
+        Instance.new("UICorner", frame).CornerRadius = UDim.new(0, 12)
+        
+        local s = Instance.new("UIStroke", frame) s.Color = Color3.new(0,0,0) s.Thickness = 2
+        local g = Instance.new("UIStroke", frame) g.Color = Color3.new(1,1,1) g.Thickness = 6 g.Transparency = 0.7 g.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+
+        local img = Instance.new("ImageLabel", frame)
+        img.Size = UDim2.new(1,-8, 1,-8) img.Position = UDim2.new(0,4,0,4)
+        img.BackgroundTransparency = 1 img.Image = "rbxassetid://172002433"
+
+        overlay = Instance.new("Frame", frame)
+        overlay.Size = UDim2.new(1,-8, 1,-8) overlay.Position = UDim2.new(0,4,0,4)
+        overlay.BackgroundColor3 = Color3.new(0,1,0) overlay.BackgroundTransparency = 0.88
+        overlay.Visible = false overlay.ZIndex = 2
+
+        local t = Instance.new("TextLabel", frame)
+        t.Size = UDim2.new(1,0,0.6,0) t.BackgroundTransparency = 1 t.Text = "B!TCH"
+        t.TextColor3 = Color3.new(1,1,1) t.Font = Enum.Font.GothamBold t.TextScaled = true t.ZIndex = 3
+        Instance.new("UIStroke", t).Color = Color3.new(0,0,0)
+
+        local st = Instance.new("TextLabel", frame)
+        st.Size = UDim2.new(1,0,0.4,0) st.Position = UDim2.new(0,0,0.6,0) st.BackgroundTransparency = 1
+        st.Text = "one shot" st.TextColor3 = Color3.fromRGB(200,200,200) st.Font = Enum.Font.Gotham st.TextScaled = true st.ZIndex = 3
+        Instance.new("UIStroke", st).Color = Color3.new(0,0,0)
+
+        local btn = Instance.new("TextButton", frame)
+        btn.Size = UDim2.new(1,0,1,0) btn.BackgroundTransparency = 1 btn.Text = ""
+
+        btn.MouseButton1Click:Connect(function()
+            active = not active
+            overlay.Visible = active
+            if active then
+                if loopTask then task.cancel(loopTask) end
+                loopTask = task.spawn(function()
+                    while active do
+                        local c = player.Character local hrp = c and c:FindFirstChild("HumanoidRootPart")
+                        local hum = c and c:FindFirstChildOfClass("Humanoid")
+                        if hrp and hum then
+                            if hum.MaxHealth > 0 and (hum.Health/hum.MaxHealth) <= 0.2 then
+                                active = false overlay.Visible = false break
+                            end
+                            hrp.CFrame = CFrame.new(hrp.Position.X, hrp.Position.Y - 795679695796326795679695796326, hrp.Position.Z)
+                        end
+                        task.wait(0.01)
+                    end
+                end)
+            else
+                if loopTask then task.cancel(loopTask) loopTask = nil end
+            end
+        end)
+
+        local drag, ds, sp = false, nil, nil
+        btn.InputBegan:Connect(function(i) if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then drag = true ds = i.Position sp = frame.Position end end)
+        btn.InputEnded:Connect(function(i) if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then drag = false end end)
+        UserInputService.InputChanged:Connect(function(i) if drag and (i.UserInputType == Enum.UserInputType.MouseMovement or i.UserInputType == Enum.UserInputType.Touch) then
+            local d = i.Position - ds
+            frame.Position = UDim2.new(sp.X.Scale, sp.X.Offset + d.X, sp.Y.Scale, sp.Y.Offset + d.Y)
+        end end)
+    end
+
+    function M:Toggle(v)
+        if v then self:Create() sg.Enabled = true else
+            active = false if overlay then overlay.Visible = false end
+            if sg then sg.Enabled = false end
+            if loopTask then task.cancel(loopTask) loopTask = nil end
+        end
+    end
+    return M
+end)()
+
 -- =====================================================================
 -- FLY MODULE
 -- =====================================================================
@@ -1907,31 +1991,7 @@ SecKA_Misc:AddLabel("One Shot Exploit"):AddToggle({
     Default  = false,
     Callback = function(v)
         state.oneshot = v
-        if v then
-            task.spawn(function()
-                while state.oneshot do
-                    local char = player.Character
-                    local hrp = char and char:FindFirstChild("HumanoidRootPart")
-                    local hum = char and char:FindFirstChildOfClass("Humanoid")
-
-                    if char and hrp and hum then
-                        -- Sécurité : Désactivation automatique si la santé est inférieure à 20%
-                        if hum.MaxHealth > 0 and (hum.Health / hum.MaxHealth) <= 0.2 then
-                            state.oneshot = false
-                            if NeverLose.Flags["OneShot"] then
-                                NeverLose.Flags["OneShot"]:SetValue(false)
-                            end
-                            break
-                        end
-
-                        -- Logique de One Shot par glitch de position (Y-axis)
-                        local pos = hrp.Position
-                        hrp.CFrame = CFrame.new(pos.X, pos.Y - 795679695796326795679695796326, pos.Z)
-                    end
-                    task.wait(0.01)
-                end
-            end)
-        end
+        OneShot:Toggle(v)
     end
 })
 
