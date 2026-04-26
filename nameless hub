@@ -61,6 +61,7 @@ local state = {
     m1_magnet   = false,
     inf_soru    = false,
     oneshot     = false,
+    eclaw_boost = false,
 }
 
 -- =====================================================================
@@ -573,6 +574,57 @@ local SA = (function()
     return M
 end)()
 
+-- 9. ECLAW BOOST (from eclaww boost.txt)
+local EClawBoost = (function()
+    local M = {}
+    local enabled = false
+    local power = 400
+    local duration = 0.9
+    local boosted = false
+
+    local function boost()
+        local char = player.Character
+        local hrp = char and char:FindFirstChild("HumanoidRootPart")
+        local hum = char and char:FindFirstChildOfClass("Humanoid")
+        if not hrp or not hum then return end
+
+        local dir = (Mouse.Hit.p - hrp.Position).Unit
+        hum.PlatformStand = true
+
+        local att = Instance.new("Attachment", hrp)
+        local lv = Instance.new("LinearVelocity", hrp)
+        lv.MaxForce = 9999999
+        lv.VelocityConstraintMode = Enum.VelocityConstraintMode.Vector
+        lv.VectorVelocity = dir * power
+        lv.Attachment0 = att
+
+        task.wait(duration)
+        if lv then lv:Destroy() end
+        if att then att:Destroy() end
+        hum.PlatformStand = false
+    end
+
+    local function hookAnimations(hum)
+        hum.AnimationPlayed:Connect(function(track)
+            if not enabled then return end
+            if track.Animation.AnimationId:find("6875496851") or track.Name == "ElectroClawXImpact" then
+                boosted = false
+                track.Stopped:Connect(function()
+                    if not enabled and not boosted then return end
+                    boosted = true
+                    task.spawn(boost)
+                end)
+            end
+        end)
+    end
+
+    function M:Toggle(v) enabled = v if not v then boosted = false end end
+    function M:SetPower(v) power = v end
+    function M:SetDuration(v) duration = v end
+    function M:Init(char) local hum = char:WaitForChild("Humanoid") hookAnimations(hum) end
+    return M
+end)()
+
 -- =====================================================================
 -- MISC LOGIC (Auto V4, Anti Mover, No Stun)
 -- =====================================================================
@@ -604,6 +656,10 @@ task.spawn(function()
         end
     end
 end)
+
+-- Character Init for EClaw
+player.CharacterAdded:Connect(function(char) EClawBoost:Init(char) end)
+if player.Character then EClawBoost:Init(player.Character) end
 
 -- =====================================================================
 -- KILL AURA MODULES (ZEN, V2, CF500)
@@ -2207,6 +2263,7 @@ Window:AddTabLabel("GLITCHES", "lightning-bolt")
 local GlitchTab   = Window:AddTab({ Name="Glitches", Icon="tag-sparkle", Type="Double" })
 local SecSanguine = GlitchTab:AddSection({ Name="Sanguine Z Boost", Icon="zap", Position="Left" })
 local SecDiamond  = GlitchTab:AddSection({ Name="Diamond Glitch",   Icon="diamond-simplified", Position="Right" })
+local SecEClaw    = GlitchTab:AddSection({ Name="EClaw X Boost",    Icon="zap", Position="Left" })
 
 SecSanguine:AddLabel("Power"):AddSlider({ Min=100, Max=5000, Default=400, Callback=function(v) multiPower = v end })
 SecSanguine:AddLabel("Duration (cs)"):AddSlider({ Min=10, Max=200, Default=90, Callback=function(v) multiDuration = v / 100 end })
@@ -2252,6 +2309,25 @@ SecDiamond:AddLabel("Keybind Diamond"):AddKeybind({
         if NeverLose.Flags["DiamondOn"] then
             NeverLose.Flags["DiamondOn"]:SetValue(state.diamond)
         end
+    end
+})
+
+SecEClaw:AddLabel("Power"):AddSlider({ Min=100, Max=5000, Default=400, Callback=function(v) EClawBoost:SetPower(v) end })
+SecEClaw:AddLabel("Duration (cs)"):AddSlider({ Min=10, Max=200, Default=90, Callback=function(v) EClawBoost:SetDuration(v / 100) end })
+SecEClaw:AddLabel("Enable EClaw Boost"):AddToggle({
+    Flag     = "EClawOn",
+    Default  = false,
+    Callback = function(v)
+        state.eclaw_boost = v
+        EClawBoost:Toggle(v)
+    end
+})
+SecEClaw:AddLabel("Keybind EClaw"):AddKeybind({
+    Flag     = "EClaw_Key",
+    Callback = function()
+        state.eclaw_boost = not state.eclaw_boost
+        EClawBoost:Toggle(state.eclaw_boost)
+        if NeverLose.Flags["EClawOn"] then NeverLose.Flags["EClawOn"]:SetValue(state.eclaw_boost) end
     end
 })
 
